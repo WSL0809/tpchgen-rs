@@ -25,6 +25,12 @@ blog](https://datafusion.apache.org/blog/2025/04/10/fastest-tpch-generator/) to 
 pip install tpchgen-cli
 ```
 
+## Install via `uv`
+
+```shell
+uv tool install tpchgen-cli 
+```
+
 ## Install via Rust
 
 [Install Rust](https://www.rust-lang.org/tools/install) and compile
