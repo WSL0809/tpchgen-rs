@@ -1,0 +1,12 @@
+[files]
+extend-exclude = [
+  "*.patch",
+  "*.dss",
+]
+
+
+[default]
+extend-ignore-re = [
+  "(?s)```.*?```",
+  "(?s)//\\s*typos:off.*?//\\s*typos:on",
+]
