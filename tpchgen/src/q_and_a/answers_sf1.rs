@@ -16,8 +16,8 @@ N              |O              |74476040.00|111701729697.74|106118230307.61|1103
 R              |F              |37719753.00|56568041380.90 |53741292684.60 |55889619119.83 |25.51  |38250.85 |0.05    |1478870
 "#;
 
+// typos:off
 /// TPC-H Minimum Cost Supplier Answer (Q2).
-/// typos:off
 pub const Q2_ANSWER: &str = r#"
 s_acctbal     |s_name                   |n_name                   |p_partkey           |p_mfgr                   |s_address                               |s_phone        |s_comment                                                                                            
 9938.53       |Supplier#000005359       |UNITED KINGDOM           |              185358|Manufacturer#4           |QKuHYh,vZGiwu2FWEJoLDx04                |33-429-790-6131|uriously regular requests hag                                                                        
@@ -360,8 +360,8 @@ VIETNAM                  |                1993|45352676.87
 VIETNAM                  |                1992|47846355.65
 "#;
 
+// typos:off
 /// TPC-H Returned Item Reporting Answer (Q10).
-/// typos:off
 pub const Q10_ANSWER: &str = r#"
 c_custkey           |c_name                   |revenue      |c_acctbal     |n_name                   |c_address                               |c_phone        |c_comment                                                                                                            
                57040|Customer#000057040       |734235.25    |632.87        |JAPAN                    |Eioyzjf4pp                              |22-895-641-3466|sits. slyly regular requests sleep alongside of the regular inst                                                     
@@ -385,7 +385,7 @@ c_custkey           |c_name                   |revenue      |c_acctbal     |n_na
                52528|Customer#000052528       |556397.35    |551.79        |ARGENTINA                |NFztyTOR10UOJ                           |11-208-192-3205| deposits hinder. blithely pending asymptotes breach slyly regular re                                                
                23431|Customer#000023431       |554269.54    |3381.86       |ROMANIA                  |HgiV0phqhaIa9aydNoIlb                   |29-915-458-2654|nusual, even instructions: furiously stealthy n                                                                      
 "#;
-//typos:on
+// typos:on
 
 /// TPC-H Important Stock Identification Answer (Q11).
 pub const Q11_ANSWER: &str = r#"
