@@ -100,6 +100,10 @@ struct Cli {
     #[arg(short, long, default_value_t = false)]
     verbose: bool,
 
+    /// Quiet mode - disable all stdout output
+    #[arg(short, long, default_value_t = false)]
+    quiet: bool,
+
     /// Write the output to stdout instead of a file.
     #[arg(long, default_value_t = false)]
     stdout: bool,
@@ -171,24 +175,27 @@ impl Cli {
     /// Main function to run the generation
     async fn main(self) -> io::Result<()> {
         // Configure logging
-        if self.verbose {
+        if self.quiet {
+            // Quiet mode: disable all logging
+            env_logger::builder().filter_level(LevelFilter::Off).init();
+        } else if self.verbose {
             env_logger::builder().filter_level(LevelFilter::Info).init();
             info!("Verbose output enabled (ignoring RUST_LOG environment variable)");
         } else {
-            env_logger::init();
+            // Default: show warnings and errors, but respect RUST_LOG if set
+            env_logger::builder()
+                .filter_level(LevelFilter::Warn)
+                .parse_default_env()
+                .init();
         }
 
         // Warn if parquet specific options are set but not generating parquet
         if self.format != OutputFormat::Parquet {
             if self.parquet_compression != Compression::SNAPPY {
-                eprintln!(
-                    "Warning: Parquet compression option set but not generating Parquet files"
-                );
+                log::warn!("Parquet compression option set but not generating Parquet files");
             }
             if self.parquet_row_group_bytes != DEFAULT_PARQUET_ROW_GROUP_BYTES {
-                eprintln!(
-                    "Warning: Parquet row group size option set but not generating Parquet files"
-                );
+                log::warn!("Parquet row group size option set but not generating Parquet files");
             }
         }
 
