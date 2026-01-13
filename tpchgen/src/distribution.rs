@@ -208,10 +208,8 @@ impl Distributions {
                 "articles" => new_self.articles = distribution,
                 "adjectives" => new_self.adjectives = distribution,
                 "adverbs" => new_self.adverbs = distribution,
-                // typos:off
                 // P.S: The correct spelling is `auxiliaries` which is what we use.
                 "auxillaries" => new_self.auxiliaries = distribution,
-                // typos:on
                 "grammar" => new_self.grammar = distribution,
                 "category" => new_self.category = distribution,
                 "msegmnt" => new_self.market_segments = distribution,
@@ -312,9 +310,7 @@ impl Distributions {
         &self.articles
     }
 
-    // typos:off
     /// Returns the `auxillaries` distribution.
-    // typos:on
     ///
     /// P.S: The correct spelling is `auxiliaries` which is what we use.
     pub fn auxiliaries(&self) -> &Distribution {
@@ -527,10 +523,8 @@ mod tests {
             "verbs",
             "adjectives",
             "adverbs",
-            // typos:off
             // P.S: The correct spelling is `auxiliaries` which is what we use.
             "auxillaries",
-            // typos:on
             "prepositions",
             "terminators",
             "grammar",

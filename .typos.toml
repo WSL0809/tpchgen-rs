@@ -8,6 +8,9 @@ extend-exclude = [
 
 [default]
 extend-ignore-re = [
-  "(?s)```.*?```",
+  "(?s)```.*?```", # ignore code blocks in markdown
   "(?s)//\\s*typos:off.*?//\\s*typos:on",
 ]
+
+[default.extend-words]
+auxillaries = "auxillaries"
