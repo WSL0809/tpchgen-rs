@@ -177,7 +177,9 @@ impl Cli {
         // Configure logging
         if self.quiet {
             // Quiet mode: only show error-level logs
-            env_logger::builder().filter_level(LevelFilter::Error).init();
+            env_logger::builder()
+                .filter_level(LevelFilter::Error)
+                .init();
         } else if self.verbose {
             env_logger::builder().filter_level(LevelFilter::Info).init();
             info!("Verbose output enabled (ignoring RUST_LOG environment variable)");
