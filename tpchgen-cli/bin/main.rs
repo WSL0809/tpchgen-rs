@@ -97,8 +97,12 @@ struct Cli {
     ///
     /// When specified, sets the log level to `info` and ignores the `RUST_LOG`
     /// environment variable. When not specified, uses `RUST_LOG`
-    #[arg(short, long, default_value_t = false)]
+    #[arg(short, long, default_value_t = false, conflicts_with = "quiet")]
     verbose: bool,
+
+    /// Quiet mode - only show error-level logs
+    #[arg(short, long, default_value_t = false, conflicts_with = "verbose")]
+    quiet: bool,
 
     /// Write the output to stdout instead of a file.
     #[arg(long, default_value_t = false)]
@@ -171,24 +175,29 @@ impl Cli {
     /// Main function to run the generation
     async fn main(self) -> io::Result<()> {
         // Configure logging
-        if self.verbose {
+        if self.quiet {
+            // Quiet mode: only show error-level logs
+            env_logger::builder()
+                .filter_level(LevelFilter::Error)
+                .init();
+        } else if self.verbose {
             env_logger::builder().filter_level(LevelFilter::Info).init();
             info!("Verbose output enabled (ignoring RUST_LOG environment variable)");
         } else {
-            env_logger::init();
+            // Default: show warnings and errors, but respect RUST_LOG if set
+            env_logger::builder()
+                .filter_level(LevelFilter::Warn)
+                .parse_default_env()
+                .init();
         }
 
         // Warn if parquet specific options are set but not generating parquet
         if self.format != OutputFormat::Parquet {
             if self.parquet_compression != Compression::SNAPPY {
-                eprintln!(
-                    "Warning: Parquet compression option set but not generating Parquet files"
-                );
+                log::warn!("Parquet compression option set but not generating Parquet files");
             }
             if self.parquet_row_group_bytes != DEFAULT_PARQUET_ROW_GROUP_BYTES {
-                eprintln!(
-                    "Warning: Parquet row group size option set but not generating Parquet files"
-                );
+                log::warn!("Parquet row group size option set but not generating Parquet files");
             }
         }
 
