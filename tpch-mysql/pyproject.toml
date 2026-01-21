@@ -1,0 +1,22 @@
+[project]
+name = "tpch-mysql"
+version = "0.1.0"
+description = "Generate TPC-H data with tpchgen-py and load into MySQL via LOAD DATA INFILE"
+requires-python = ">=3.8"
+dependencies = [
+  "pymysql>=1.1.0",
+  "tpchgen @ file:../tpchgen-py",
+]
+
+[project.scripts]
+tpch-mysql = "tpch_mysql.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
