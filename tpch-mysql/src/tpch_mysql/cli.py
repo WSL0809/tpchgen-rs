@@ -90,6 +90,10 @@ def cmd_load(args: argparse.Namespace) -> int:
     tables = args.tables or list(TABLES)
     conn = connect_mysql(cfg)
     try:
+        if args.truncate:
+            with conn.cursor() as cur:
+                for table in tables:
+                    cur.execute(f"TRUNCATE TABLE `{table}`")
         for table in tables:
             file_path = data_dir / TABLE_TO_FILENAME[table]
             load_data_infile(
@@ -224,6 +228,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_load.add_argument("--data-dir", required=True)
     p_load.add_argument("--tables", type=_parse_tables, help="Comma-separated table list")
     p_load.add_argument("--ignore-header-lines", type=int, default=1)
+    p_load.add_argument(
+        "--truncate",
+        action="store_true",
+        help="Truncate target tables before loading (disabled by default)",
+    )
     p_load.set_defaults(func=cmd_load)
 
     p_all = sub.add_parser("all", help="Run schema + gen + load")
@@ -233,6 +242,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_all.add_argument("--threads", type=int)
     p_all.add_argument("--tables", type=_parse_tables, help="Comma-separated table list")
     p_all.add_argument("--ignore-header-lines", type=int, default=1)
+    p_all.add_argument(
+        "--truncate",
+        action="store_true",
+        help="Truncate target tables before loading (disabled by default)",
+    )
     p_all.set_defaults(func=cmd_all)
 
     p_run = sub.add_parser("run", help="Run TPC-H queries and record timings")

@@ -30,7 +30,7 @@ Run individual steps:
 ```bash
 uv run tpch-mysql schema --host ... --port ... --user ... --password ... --database ...
 uv run tpch-mysql gen    --data-dir /home/jason/wangsl/tpch --scale-factor 1
-uv run tpch-mysql load   --host ... --port ... --user ... --password ... --database ... --data-dir /home/jason/wangsl/tpch
+uv run tpch-mysql load   --host ... --port ... --user ... --password ... --database ... --data-dir /home/jason/wangsl/tpch --truncate
 ```
 
 `load` defaults to `--ignore-header-lines 1` because `tpchgen` CSV output includes a header row.
