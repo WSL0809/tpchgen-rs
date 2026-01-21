@@ -55,6 +55,19 @@ the output of this crate with [`dbgen`] as part of every checkin. See
 
 [`dbgen`]: https://github.com/electrum/tpch-dbgen
 
+## Python bindings
+
+This repo also includes Python bindings in `tpchgen-py/` (a PyO3 / `maturin`
+package). It is excluded from the Rust workspace.
+
+Build wheels locally:
+
+```bash
+cd tpchgen-py
+uv sync
+uv run maturin build --release --out dist
+```
+
 ## Contributing
 
 Pull requests are welcome. For major changes, please open an issue first for
