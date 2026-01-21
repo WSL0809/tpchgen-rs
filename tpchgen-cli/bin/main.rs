@@ -13,9 +13,7 @@ use log::{info, LevelFilter};
 use std::io;
 use std::path::PathBuf;
 use std::str::FromStr;
-use tpchgen_cli::{
-    Compression, OutputFormat, Table, TpchGenerator, DEFAULT_PARQUET_ROW_GROUP_BYTES,
-};
+use tpchgen_cli::{parse_csv_delimiter, OutputFormat, Table, TpchGenerator};
 
 #[derive(Parser)]
 #[command(name = "tpchgen")]
@@ -37,11 +35,6 @@ Examples
 # Generate all tables at scale factor 1 (1GB) in TBL format to /tmp/tpch directory:
 
 tpchgen-cli -s 1 --output-dir=/tmp/tpch
-
-# Generate the lineitem table at scale factor 100 in 10 Apache Parquet files to
-# /tmp/tpch/lineitem
-
-tpchgen-cli -s 100 --tables=lineitem --format=parquet --parts=10 --output-dir=/tmp/tpch
 
 # Generate scale factor one in current directory, seeing debug output
 
@@ -69,29 +62,19 @@ struct Cli {
     #[arg(long)]
     part: Option<i32>,
 
-    /// Output format: tbl, csv, parquet
+    /// Output format: tbl, csv
     #[arg(short, long, default_value = "tbl")]
     format: OutputFormat,
+
+    /// Delimiter character for CSV output (default: `,`)
+    ///
+    /// Supports escape sequences such as `\\t` and `\\x09`.
+    #[arg(long, default_value = ",")]
+    delimiter: String,
 
     /// The number of threads for parallel generation, defaults to the number of CPUs
     #[arg(short, long, default_value_t = num_cpus::get())]
     num_threads: usize,
-
-    /// Parquet block compression format.
-    ///
-    /// Supported values: UNCOMPRESSED, ZSTD(N), SNAPPY, GZIP, LZO, BROTLI, LZ4
-    ///
-    /// Note to use zstd you must supply the "compression" level (1-22)
-    /// as a number in parentheses, e.g. `ZSTD(1)` for level 1 compression.
-    ///
-    /// Using `ZSTD` results in the best compression, but is about 2x slower than
-    /// UNCOMPRESSED. For example, for the lineitem table at SF=10
-    ///
-    ///   ZSTD(1):      1.9G  (0.52 GB/sec)
-    ///   SNAPPY:       2.4G  (0.75 GB/sec)
-    ///   UNCOMPRESSED: 3.8G  (1.41 GB/sec)
-    #[arg(short = 'c', long, default_value = "SNAPPY")]
-    parquet_compression: Compression,
 
     /// Verbose output
     ///
@@ -107,21 +90,6 @@ struct Cli {
     /// Write the output to stdout instead of a file.
     #[arg(long, default_value_t = false)]
     stdout: bool,
-
-    /// Target size in row group bytes in Parquet files
-    ///
-    /// Row groups are the typical unit of parallel processing and compression
-    /// with many query engines. Therefore, smaller row groups enable better
-    /// parallelism and lower peak memory use but may reduce compression
-    /// efficiency.
-    ///
-    /// Note: Parquet files are limited to 32k row groups, so at high scale
-    /// factors, the row group size may be increased to keep the number of row
-    /// groups under this limit.
-    ///
-    /// Typical values range from 10MB to 100MB.
-    #[arg(long, default_value_t = DEFAULT_PARQUET_ROW_GROUP_BYTES)]
-    parquet_row_group_bytes: i64,
 }
 
 // TableValueParser is CLI-specific and uses the Table type from the library
@@ -191,24 +159,26 @@ impl Cli {
                 .init();
         }
 
-        // Warn if parquet specific options are set but not generating parquet
-        if self.format != OutputFormat::Parquet {
-            if self.parquet_compression != Compression::SNAPPY {
-                log::warn!("Parquet compression option set but not generating Parquet files");
-            }
-            if self.parquet_row_group_bytes != DEFAULT_PARQUET_ROW_GROUP_BYTES {
-                log::warn!("Parquet row group size option set but not generating Parquet files");
-            }
+        // Warn if CSV-specific options are set but not generating CSV output
+        if self.format != OutputFormat::Csv && self.delimiter != "," {
+            log::warn!("CSV delimiter option set but not generating CSV files");
         }
+
+        // Parse delimiter (used only for CSV output)
+        let csv_delimiter = if self.format == OutputFormat::Csv {
+            parse_csv_delimiter(&self.delimiter)
+                .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?
+        } else {
+            b','
+        };
 
         // Build the generator using the library API
         let mut builder = TpchGenerator::builder()
             .with_scale_factor(self.scale_factor)
             .with_output_dir(self.output_dir)
             .with_format(self.format)
+            .with_csv_delimiter(csv_delimiter)
             .with_num_threads(self.num_threads)
-            .with_parquet_compression(self.parquet_compression)
-            .with_parquet_row_group_bytes(self.parquet_row_group_bytes)
             .with_stdout(self.stdout);
 
         // Add tables if specified

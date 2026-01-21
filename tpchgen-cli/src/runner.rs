@@ -3,21 +3,15 @@
 use crate::csv::*;
 use crate::generate::{generate_in_chunks, Source};
 use crate::output_plan::{OutputLocation, OutputPlan};
-use crate::parquet::generate_parquet;
 use crate::tbl::*;
 use crate::tbl::{LineItemTblSource, NationTblSource, RegionTblSource};
 use crate::{OutputFormat, Table, WriterSink};
 use log::{debug, info};
 use std::io;
-use std::io::BufWriter;
 use tokio::task::{JoinError, JoinSet};
 use tpchgen::generators::{
     CustomerGenerator, LineItemGenerator, NationGenerator, OrderGenerator, PartGenerator,
     PartSuppGenerator, RegionGenerator, SupplierGenerator,
-};
-use tpchgen_arrow::{
-    CustomerArrow, LineItemArrow, NationArrow, OrderArrow, PartArrow, PartSuppArrow,
-    RecordBatchIterator, RegionArrow, SupplierArrow,
 };
 
 /// Runs multiple [`OutputPlan`]s in parallel, managing the number of threads
@@ -26,12 +20,17 @@ use tpchgen_arrow::{
 pub struct PlanRunner {
     plans: Vec<OutputPlan>,
     num_threads: usize,
+    csv_delimiter: u8,
 }
 
 impl PlanRunner {
     /// Create a new [`PlanRunner`] with the given plans and number of threads.
-    pub fn new(plans: Vec<OutputPlan>, num_threads: usize) -> Self {
-        Self { plans, num_threads }
+    pub fn new(plans: Vec<OutputPlan>, num_threads: usize, csv_delimiter: u8) -> Self {
+        Self {
+            plans,
+            num_threads,
+            csv_delimiter,
+        }
     }
 
     /// Run all the plans in the runner.
@@ -44,6 +43,7 @@ impl PlanRunner {
         let Self {
             mut plans,
             num_threads,
+            csv_delimiter,
         } = self;
 
         // Sort the plans by the number of parts so the largest are first
@@ -56,7 +56,7 @@ impl PlanRunner {
         // Do the actual work in parallel, using a worker queue
         let mut worker_queue = WorkerQueue::new(num_threads);
         while let Some(plan) = plans.pop() {
-            worker_queue.schedule_plan(plan).await?;
+            worker_queue.schedule_plan(plan, csv_delimiter).await?;
         }
         worker_queue.join_all().await
     }
@@ -102,7 +102,7 @@ impl WorkerQueue {
     /// Note this algorithm does not guarantee that all threads are always busy,
     /// but it should be good enough for most cases. For best thread utilization
     /// spawn the largest plans first.
-    pub async fn schedule_plan(&mut self, plan: OutputPlan) -> io::Result<()> {
+    pub async fn schedule_plan(&mut self, plan: OutputPlan, csv_delimiter: u8) -> io::Result<()> {
         debug!("scheduling plan {plan}");
         loop {
             if self.available_threads == 0 {
@@ -137,7 +137,7 @@ impl WorkerQueue {
             debug!("Spawning plan {plan} with {num_plan_threads} threads");
 
             self.join_set
-                .spawn(async move { run_plan(plan, num_plan_threads).await });
+                .spawn(async move { run_plan(plan, num_plan_threads, csv_delimiter).await });
             self.available_threads -= num_plan_threads;
             return Ok(());
         }
@@ -160,16 +160,16 @@ fn task_result<T>(result: Result<io::Result<T>, JoinError>) -> io::Result<T> {
 }
 
 /// Run a single [`OutputPlan`]
-async fn run_plan(plan: OutputPlan, num_threads: usize) -> io::Result<usize> {
+async fn run_plan(plan: OutputPlan, num_threads: usize, csv_delimiter: u8) -> io::Result<usize> {
     match plan.table() {
-        Table::Nation => run_nation_plan(plan, num_threads).await,
-        Table::Region => run_region_plan(plan, num_threads).await,
-        Table::Part => run_part_plan(plan, num_threads).await,
-        Table::Supplier => run_supplier_plan(plan, num_threads).await,
-        Table::Partsupp => run_partsupp_plan(plan, num_threads).await,
-        Table::Customer => run_customer_plan(plan, num_threads).await,
-        Table::Orders => run_orders_plan(plan, num_threads).await,
-        Table::Lineitem => run_lineitem_plan(plan, num_threads).await,
+        Table::Nation => run_nation_plan(plan, num_threads, csv_delimiter).await,
+        Table::Region => run_region_plan(plan, num_threads, csv_delimiter).await,
+        Table::Part => run_part_plan(plan, num_threads, csv_delimiter).await,
+        Table::Supplier => run_supplier_plan(plan, num_threads, csv_delimiter).await,
+        Table::Partsupp => run_partsupp_plan(plan, num_threads, csv_delimiter).await,
+        Table::Customer => run_customer_plan(plan, num_threads, csv_delimiter).await,
+        Table::Orders => run_orders_plan(plan, num_threads, csv_delimiter).await,
+        Table::Lineitem => run_lineitem_plan(plan, num_threads, csv_delimiter).await,
     }
 }
 
@@ -209,40 +209,6 @@ where
     }
 }
 
-/// Generates an output parquet file from the sources
-async fn write_parquet<I>(plan: OutputPlan, num_threads: usize, sources: I) -> Result<(), io::Error>
-where
-    I: Iterator<Item: RecordBatchIterator> + 'static,
-{
-    match plan.output_location() {
-        OutputLocation::Stdout => {
-            let writer = BufWriter::with_capacity(32 * 1024 * 1024, io::stdout()); // 32MB buffer
-            generate_parquet(writer, sources, num_threads, plan.parquet_compression()).await
-        }
-        OutputLocation::File(path) => {
-            // if the output already exists, skip running
-            if path.exists() {
-                log::warn!("{} already exists, skipping generation", path.display());
-                return Ok(());
-            }
-            // write to a temp file and then rename to avoid partial files
-            let temp_path = path.with_extension("inprogress");
-            let file = std::fs::File::create(&temp_path).map_err(|err| {
-                io::Error::other(format!("Failed to create {temp_path:?}: {err}"))
-            })?;
-            let writer = BufWriter::with_capacity(32 * 1024 * 1024, file); // 32MB buffer
-            generate_parquet(writer, sources, num_threads, plan.parquet_compression()).await?;
-            // rename the temp file to the final path
-            std::fs::rename(&temp_path, path).map_err(|e| {
-                io::Error::other(format!(
-                    "Failed to rename {temp_path:?} to {path:?} file: {e}"
-                ))
-            })?;
-            Ok(())
-        }
-    }
-}
-
 /// macro to create a function for generating a part of a particular able
 ///
 /// Arguments:
@@ -250,10 +216,13 @@ where
 /// $GENERATOR: The generator type to use
 /// $TBL_SOURCE: The [`Source`] type to use for TBL format
 /// $CSV_SOURCE: The [`Source`] type to use for CSV format
-/// $PARQUET_SOURCE: The [`RecordBatchIterator`] type to use for Parquet format
 macro_rules! define_run {
-    ($FUN_NAME:ident, $GENERATOR:ident, $TBL_SOURCE:ty, $CSV_SOURCE:ty, $PARQUET_SOURCE:ty) => {
-        async fn $FUN_NAME(plan: OutputPlan, num_threads: usize) -> io::Result<usize> {
+    ($FUN_NAME:ident, $GENERATOR:ident, $TBL_SOURCE:ty, $CSV_SOURCE:ty) => {
+        async fn $FUN_NAME(
+            plan: OutputPlan,
+            num_threads: usize,
+            csv_delimiter: u8,
+        ) -> io::Result<usize> {
             use crate::GenerationPlan;
             let scale_factor = plan.scale_factor();
             info!("Writing {plan} using {num_threads} threads");
@@ -280,23 +249,13 @@ macro_rules! define_run {
             fn csv_sources(
                 generation_plan: &GenerationPlan,
                 scale_factor: f64,
+                csv_delimiter: u8,
             ) -> impl Iterator<Item: Source> + 'static {
                 generation_plan
                     .clone()
                     .into_iter()
                     .map(move |(part, num_parts)| $GENERATOR::new(scale_factor, part, num_parts))
-                    .map(<$CSV_SOURCE>::new)
-            }
-
-            fn parquet_sources(
-                generation_plan: &GenerationPlan,
-                scale_factor: f64,
-            ) -> impl Iterator<Item: RecordBatchIterator> + 'static {
-                generation_plan
-                    .clone()
-                    .into_iter()
-                    .map(move |(part, num_parts)| $GENERATOR::new(scale_factor, part, num_parts))
-                    .map(<$PARQUET_SOURCE>::new)
+                    .map(move |generator| <$CSV_SOURCE>::new(generator, csv_delimiter))
             }
 
             // Dispatch to the appropriate output format
@@ -306,12 +265,8 @@ macro_rules! define_run {
                     write_file(plan, num_threads, gens).await?
                 }
                 OutputFormat::Csv => {
-                    let gens = csv_sources(plan.generation_plan(), scale_factor);
+                    let gens = csv_sources(plan.generation_plan(), scale_factor, csv_delimiter);
                     write_file(plan, num_threads, gens).await?
-                }
-                OutputFormat::Parquet => {
-                    let gens = parquet_sources(plan.generation_plan(), scale_factor);
-                    write_parquet(plan, num_threads, gens).await?
                 }
             };
             Ok(num_threads)
@@ -323,61 +278,53 @@ define_run!(
     run_lineitem_plan,
     LineItemGenerator,
     LineItemTblSource,
-    LineItemCsvSource,
-    LineItemArrow
+    LineItemCsvSource
 );
 
 define_run!(
     run_nation_plan,
     NationGenerator,
     NationTblSource,
-    NationCsvSource,
-    NationArrow
+    NationCsvSource
 );
 
 define_run!(
     run_region_plan,
     RegionGenerator,
     RegionTblSource,
-    RegionCsvSource,
-    RegionArrow
+    RegionCsvSource
 );
 
 define_run!(
     run_part_plan,
     PartGenerator,
     PartTblSource,
-    PartCsvSource,
-    PartArrow
+    PartCsvSource
 );
 
 define_run!(
     run_supplier_plan,
     SupplierGenerator,
     SupplierTblSource,
-    SupplierCsvSource,
-    SupplierArrow
+    SupplierCsvSource
 );
 define_run!(
     run_partsupp_plan,
     PartSuppGenerator,
     PartSuppTblSource,
-    PartSuppCsvSource,
-    PartSuppArrow
+    PartSuppCsvSource
 );
 
 define_run!(
     run_customer_plan,
     CustomerGenerator,
     CustomerTblSource,
-    CustomerCsvSource,
-    CustomerArrow
+    CustomerCsvSource
 );
 
 define_run!(
     run_orders_plan,
     OrderGenerator,
     OrderTblSource,
-    OrderCsvSource,
-    OrderArrow
+    OrderCsvSource
 );

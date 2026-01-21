@@ -1,6 +1,7 @@
 [workspace]
 
-members = [ "tpchgen", "tpcdsgen" , "tpchgen-arrow", "tpchgen-cli"]
+members = ["tpchgen", "tpchgen-cli"]
+exclude = ["tpchgen-py"]
 
 resolver = "2"
 

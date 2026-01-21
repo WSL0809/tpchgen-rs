@@ -31,22 +31,6 @@ details on performance and benchmarking.
 
 [`tpchgen-cli`]: ./tpchgen-cli/README.md
 
-Times to create TPCH tables in Parquet format using `tpchgen-cli` and `duckdb` for various scale factors.
-
-| Scale Factor | `tpchgen-cli` | DuckDB     | DuckDB (proprietary) |
-| ------------ | ------------- | ---------- | -------------------- |
-| 1            | `0:02.24`     | `0:12.29`  | `0:10.68`            |
-| 10           | `0:09.97`     | `1:46.80`  | `1:41.14`            |
-| 100          | `1:14.22`     | `17:48.27` | `16:40.88`           |
-| 1000         | `10:26.26`    | N/A (OOM)  | N/A (OOM)            |
-
-- DuckDB (proprietary) is the time required to create TPCH data using the
-  proprietary DuckDB format
-- Creating Scale Factor 1000 using DuckDB [required 647 GB of memory](https://duckdb.org/docs/stable/extensions/tpch.html#resource-usage-of-the-data-generator),
-  which is why it is not included in the table above.
-
-![Parquet Generation Performance](parquet-performance.png)
-
 
 ## Answers
 
@@ -66,13 +50,9 @@ the output of this crate with [`dbgen`] as part of every checkin. See
 - [`tpchgen`](tpchgen): the core data generator logic for TPC-H. It has no
   dependencies and is easy to embed in other Rust project.
 
-- [`tpchgen-arrow`](tpchgen-arrow) generates TPC-H data in [Apache Arrow]
-  format. It depends on the arrow-rs library
-
 - [`tpchgen-cli`](tpchgen-cli) is a [`dbgen`] compatible CLI tool that generates
   benchmark dataset using multiple processes.
 
-[Apache Arrow]: https://arrow.apache.org/
 [`dbgen`]: https://github.com/electrum/tpch-dbgen
 
 ## Contributing

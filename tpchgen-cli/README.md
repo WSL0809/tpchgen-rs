@@ -43,18 +43,15 @@ RUSTFLAGS='-C target-cpu=native' cargo install tpchgen-cli
 ## Examples
 
 ```shell
-# Scale Factor 10, all tables, in Apache Parquet format in the current directory
-# (3.6GB, 8 files, 60M lineitem rows, in 5 seconds on a modern laptop)
-tpchgen-cli -s 10 --format=parquet
-
 # Scale Factor 10, all tables, in `tbl`(csv like) format in the `sf10` directory
 # (10GB, 8 files, 60M lineitem rows)
 tpchgen-cli -s 10 --output-dir sf10
 
-# Scale Factor 1000, lineitem table, in Apache Parquet format in sf1000 directory, 
-# 20 part(ititons), 100MB row groups
-# (220GB, 20 files, 6B lineitem rows, 3.5 minutes on a modern laptop)
-tpchgen-cli -s 1000 --tables lineitem --parts 20 --format=parquet --parquet-row-group-bytes=100000000 --output-dir sf1000
+# Scale Factor 10, all tables, in CSV format (default delimiter `,`)
+tpchgen-cli -s 10 --format=csv --output-dir sf10_csv
+
+# Scale Factor 10, lineitem table, in tab-delimited CSV (TSV) format
+tpchgen-cli -s 10 --tables lineitem --format=csv --delimiter '\\t' --output-dir sf10_tsv
 
 # Scale Factor 10, partition 2 and 3 of 10 in sf10 directory
 #
@@ -73,17 +70,4 @@ done
 
 ## Performance
 
-| Scale Factor | `tpchgen-cli` | DuckDB     | DuckDB (proprietary) |
-| ------------ | ------------- | ---------- | -------------------- |
-| 1            | `0:02.24`     | `0:12.29`  | `0:10.68`            |
-| 10           | `0:09.97`     | `1:46.80`  | `1:41.14`            |
-| 100          | `1:14.22`     | `17:48.27` | `16:40.88`           |
-| 1000         | `10:26.26`    | N/A (OOM)  | N/A (OOM)            |
-
-- DuckDB (proprietary) is the time required to create TPCH data using the
-  proprietary DuckDB format
-- Creating Scale Factor 1000 data in DuckDB [required 647 GB of memory](https://duckdb.org/docs/stable/extensions/tpch.html#resource-usage-of-the-data-generator),
-  which is why it is not included in the table above.
-
-Times to create TPCH tables in Parquet format using `tpchgen-cli` and `duckdb` for various scale factors.
-
+See [BENCHMARKS.md] for performance and benchmarking details.

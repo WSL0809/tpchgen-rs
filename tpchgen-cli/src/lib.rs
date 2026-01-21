@@ -1,7 +1,7 @@
 //! TPC-H Data Generator Library
 //!
 //! This crate provides both a command-line tool and a library for generating
-//! TPC-H benchmark data in various formats (TBL, CSV, Parquet).
+//! TPC-H benchmark data in various formats (TBL, CSV).
 //!
 //! # Examples
 //!
@@ -14,7 +14,7 @@
 //!     .with_scale_factor(10.0)
 //!     .with_output_dir(PathBuf::from("./data"))
 //!     .with_tables(vec![Table::Customer, Table::Orders])
-//!     .with_format(OutputFormat::Parquet)
+//!     .with_format(OutputFormat::Csv)
 //!     .with_num_threads(8)
 //!     .build();
 //!
@@ -23,24 +23,20 @@
 //! # }
 //! ```
 
-pub use crate::plan::{GenerationPlan, DEFAULT_PARQUET_ROW_GROUP_BYTES};
-pub use ::parquet::basic::Compression;
+pub use crate::plan::GenerationPlan;
 
 pub mod csv;
 pub mod generate;
 pub mod output_plan;
-pub mod parquet;
 pub mod plan;
 pub mod runner;
 pub mod statistics;
 pub mod tbl;
 
 use crate::generate::Sink;
-use crate::parquet::IntoSize;
 use crate::statistics::WriteStatistics;
 use std::fmt::Display;
-use std::fs::File;
-use std::io::{self, BufWriter, Stdout, Write};
+use std::io::{self, Write};
 use std::str::FromStr;
 
 /// Wrapper around a buffer writer that counts the number of buffers and bytes written
@@ -67,21 +63,6 @@ impl<W: Write + Send> Sink for WriterSink<W> {
 
     fn flush(mut self) -> Result<(), io::Error> {
         self.inner.flush()
-    }
-}
-
-impl IntoSize for BufWriter<Stdout> {
-    fn into_size(self) -> Result<usize, io::Error> {
-        // we can't get the size of stdout, so just return 0
-        Ok(0)
-    }
-}
-
-impl IntoSize for BufWriter<File> {
-    fn into_size(self) -> Result<usize, io::Error> {
-        let file = self.into_inner()?;
-        let metadata = file.metadata()?;
-        Ok(metadata.len() as usize)
     }
 }
 
@@ -160,15 +141,12 @@ impl Table {
 ///
 /// - **TBL**: Pipe-delimited format compatible with original dbgen tool
 /// - **CSV**: Comma-separated values with proper escaping
-/// - **Parquet**: Columnar Apache Parquet format with configurable compression
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum OutputFormat {
     /// TBL format (pipe-delimited, dbgen-compatible)
     Tbl,
     /// CSV format (comma-separated values)
     Csv,
-    /// Apache Parquet format (columnar, compressed)
-    Parquet,
 }
 
 impl FromStr for OutputFormat {
@@ -178,9 +156,8 @@ impl FromStr for OutputFormat {
         match s.to_lowercase().as_str() {
             "tbl" => Ok(OutputFormat::Tbl),
             "csv" => Ok(OutputFormat::Csv),
-            "parquet" => Ok(OutputFormat::Parquet),
             _ => Err(format!(
-                "Invalid output format: {s}. Valid formats are: tbl, csv, parquet"
+                "Invalid output format: {s}. Valid formats are: tbl, csv"
             )),
         }
     }
@@ -191,8 +168,65 @@ impl Display for OutputFormat {
         match self {
             OutputFormat::Tbl => write!(f, "tbl"),
             OutputFormat::Csv => write!(f, "csv"),
-            OutputFormat::Parquet => write!(f, "parquet"),
         }
+    }
+}
+
+/// Parses a delimiter value for CSV output.
+///
+/// Accepts a single ASCII character (including a literal tab) or common escape sequences:
+/// `\\t`, `\\n`, `\\r`, `\\\\`, and `\\xNN` (hex).
+pub fn parse_csv_delimiter(value: &str) -> Result<u8, String> {
+    if value.is_empty() {
+        return Err("CSV delimiter must not be empty".to_string());
+    }
+
+    let delimiter = if value.len() == 1 {
+        value.as_bytes()[0]
+    } else if value.starts_with('\\') {
+        match value.as_bytes() {
+            [b'\\', b't'] => b'\t',
+            [b'\\', b'n'] => b'\n',
+            [b'\\', b'r'] => b'\r',
+            [b'\\', b'\\'] => b'\\',
+            [b'\\', b'x', hi, lo] => {
+                fn hex(b: u8) -> Option<u8> {
+                    match b {
+                        b'0'..=b'9' => Some(b - b'0'),
+                        b'a'..=b'f' => Some(b - b'a' + 10),
+                        b'A'..=b'F' => Some(b - b'A' + 10),
+                        _ => None,
+                    }
+                }
+                let Some(hi) = hex(*hi) else {
+                    return Err(format!("Invalid CSV delimiter escape: {value}"));
+                };
+                let Some(lo) = hex(*lo) else {
+                    return Err(format!("Invalid CSV delimiter escape: {value}"));
+                };
+                hi << 4 | lo
+            }
+            _ => return Err(format!("Invalid CSV delimiter escape: {value}")),
+        }
+    } else {
+        let mut chars = value.chars();
+        let Some(c) = chars.next() else {
+            return Err("CSV delimiter must not be empty".to_string());
+        };
+        if chars.next().is_some() {
+            return Err("CSV delimiter must be a single character".to_string());
+        }
+        if !c.is_ascii() {
+            return Err("CSV delimiter must be an ASCII character".to_string());
+        }
+        c as u8
+    };
+
+    match delimiter {
+        0 => Err("CSV delimiter cannot be NUL".to_string()),
+        b'\n' | b'\r' => Err("CSV delimiter cannot be a newline character".to_string()),
+        b'"' => Err("CSV delimiter cannot be '\"'".to_string()),
+        _ => Ok(delimiter),
     }
 }
 
@@ -220,14 +254,12 @@ pub struct GeneratorConfig {
     pub output_dir: std::path::PathBuf,
     /// Tables to generate (if None, generates all tables)
     pub tables: Option<Vec<Table>>,
-    /// Output format (TBL, CSV, or Parquet)
+    /// Output format (TBL, or CSV)
     pub format: OutputFormat,
+    /// Delimiter byte for CSV output (default: `,`)
+    pub csv_delimiter: u8,
     /// Number of threads for parallel generation
     pub num_threads: usize,
-    /// Parquet compression format
-    pub parquet_compression: Compression,
-    /// Target row group size in bytes for Parquet files
-    pub parquet_row_group_bytes: i64,
     /// Number of partitions to generate (if None, generates a single file per table)
     pub parts: Option<i32>,
     /// Specific partition to generate (1-based, requires parts to be set)
@@ -243,9 +275,8 @@ impl Default for GeneratorConfig {
             output_dir: std::path::PathBuf::from("."),
             tables: None,
             format: OutputFormat::Tbl,
+            csv_delimiter: b',',
             num_threads: num_cpus::get(),
-            parquet_compression: Compression::SNAPPY,
-            parquet_row_group_bytes: DEFAULT_PARQUET_ROW_GROUP_BYTES,
             parts: None,
             part: None,
             stdout: false,
@@ -263,7 +294,6 @@ impl Default for GeneratorConfig {
 /// ```no_run
 /// use tpchgen_cli::{TpchGenerator, Table, OutputFormat};
 /// use std::path::PathBuf;
-/// use ::parquet::basic::ZstdLevel;
 /// # async fn example() -> std::io::Result<()> {
 /// // Generate all tables at scale factor 1 in TBL format
 /// TpchGenerator::builder()
@@ -273,17 +303,6 @@ impl Default for GeneratorConfig {
 ///     .generate()
 ///     .await?;
 ///
-/// // Generate specific tables in Parquet format with compression
-/// TpchGenerator::builder()
-///     .with_scale_factor(10.0)
-///     .with_output_dir(PathBuf::from("./benchmark_data"))
-///     .with_tables(vec![Table::Orders, Table::Lineitem])
-///     .with_format(OutputFormat::Parquet)
-///     .with_parquet_compression(tpchgen_cli::Compression::ZSTD(ZstdLevel::try_new(1).unwrap()))
-///     .with_num_threads(16)
-///     .build()
-///     .generate()
-///     .await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -368,8 +387,6 @@ impl TpchGenerator {
         let mut output_plan_generator = OutputPlanGenerator::new(
             config.format,
             config.scale_factor,
-            config.parquet_compression,
-            config.parquet_row_group_bytes,
             config.stdout,
             config.output_dir,
         );
@@ -388,7 +405,7 @@ impl TpchGenerator {
         info!("Created static distributions and text pools in {elapsed:?}");
 
         // Run
-        let runner = PlanRunner::new(output_plans, config.num_threads);
+        let runner = PlanRunner::new(output_plans, config.num_threads, config.csv_delimiter);
         runner.run().await?;
         info!("Generation complete!");
         Ok(())
@@ -408,23 +425,19 @@ impl TpchGenerator {
 /// - Tables: all 8 tables
 /// - Format: TBL
 /// - Threads: number of CPUs
-/// - Parquet compression: SNAPPY
-/// - Row group size: 7MB
 ///
 /// # Examples
 ///
 /// ```no_run
-/// use tpchgen_cli::{TpchGenerator, Table, OutputFormat, Compression};
+/// use tpchgen_cli::{TpchGenerator, Table, OutputFormat};
 /// use std::path::PathBuf;
-/// use ::parquet::basic::ZstdLevel;
 ///
 /// # async fn example() -> std::io::Result<()> {
 /// let generator = TpchGenerator::builder()
 ///     .with_scale_factor(100.0)
 ///     .with_output_dir(PathBuf::from("/data/tpch"))
 ///     .with_tables(vec![Table::Lineitem, Table::Orders])
-///     .with_format(OutputFormat::Parquet)
-///     .with_parquet_compression(Compression::ZSTD(ZstdLevel::try_new(3).unwrap()))
+///     .with_format(OutputFormat::Csv)
 ///     .with_num_threads(32)
 ///     .build();
 ///
@@ -482,21 +495,15 @@ impl TpchGeneratorBuilder {
         self
     }
 
+    /// Set delimiter byte for CSV output (default: `,`)
+    pub fn with_csv_delimiter(mut self, csv_delimiter: u8) -> Self {
+        self.config.csv_delimiter = csv_delimiter;
+        self
+    }
+
     /// Set the number of threads for parallel generation (default: number of CPUs)
     pub fn with_num_threads(mut self, num_threads: usize) -> Self {
         self.config.num_threads = num_threads;
-        self
-    }
-
-    /// Set Parquet compression format (default: SNAPPY)
-    pub fn with_parquet_compression(mut self, compression: Compression) -> Self {
-        self.config.parquet_compression = compression;
-        self
-    }
-
-    /// Set target row group size in bytes for Parquet files (default: 7MB)
-    pub fn with_parquet_row_group_bytes(mut self, bytes: i64) -> Self {
-        self.config.parquet_row_group_bytes = bytes;
         self
     }
 
