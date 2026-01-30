@@ -125,12 +125,7 @@ pub struct OutputPlanGenerator {
 }
 
 impl OutputPlanGenerator {
-    pub fn new(
-        format: OutputFormat,
-        scale_factor: f64,
-        stdout: bool,
-        output_dir: PathBuf,
-    ) -> Self {
+    pub fn new(format: OutputFormat, scale_factor: f64, stdout: bool, output_dir: PathBuf) -> Self {
         Self {
             format,
             scale_factor,

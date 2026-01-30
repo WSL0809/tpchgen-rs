@@ -66,13 +66,9 @@ impl GenerationPlan {
                     "The --part_count option requires the --part option to be set",
                 ))
             }
-            (Some(part), Some(part_count)) => Self::try_new_with_parts(
-                table,
-                format,
-                scale_factor,
-                part,
-                part_count,
-            ),
+            (Some(part), Some(part_count)) => {
+                Self::try_new_with_parts(table, format, scale_factor, part, part_count)
+            }
             (None, None) => Self::try_new_without_parts(table, format, scale_factor),
         }
     }
@@ -576,7 +572,6 @@ mod tests {
             self.cli_part_count = Some(cli_part_count);
             self
         }
-
     }
 
     impl Default for Test {

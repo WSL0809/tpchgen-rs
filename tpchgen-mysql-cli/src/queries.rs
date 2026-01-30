@@ -1,27 +1,21 @@
-from __future__ import annotations
+//! TPC-H queries (MySQL-adapted) used by `tpch-mysql`.
 
-from dataclasses import dataclass
+#[derive(Debug, Clone, Copy)]
+pub struct Query {
+    pub query_id: u32,
+    pub title: &'static str,
+    pub statements: &'static [&'static str],
+}
 
+pub fn get_query(id: u32) -> Option<&'static Query> {
+    QUERIES.iter().find(|q| q.query_id == id)
+}
 
-@dataclass(frozen=True)
-class Query:
-    query_id: int
-    title: str
-    statements: tuple[str, ...]
-
-
-def _stmt(sql: str) -> str:
-    return sql.strip().rstrip(";").strip()
-
-
-QUERIES: dict[int, Query] = {
-    1: Query(
-        1,
-        "Pricing Summary Report Query",
-        (
-            _stmt(
-                """
-                select
+static QUERIES: [Query; 22] = [
+    Query {
+        query_id: 1,
+        title: "Pricing Summary Report Query",
+        statements: &[r####"select
                         l_returnflag,
                         l_linestatus,
                         sum(l_quantity) as sum_qty,
@@ -41,18 +35,12 @@ QUERIES: dict[int, Query] = {
                         l_linestatus
                 order by
                         l_returnflag,
-                        l_linestatus
-                """
-            ),
-        ),
-    ),
-    2: Query(
-        2,
-        "Minimum Cost Supplier Query",
-        (
-            _stmt(
-                """
-                select
+                        l_linestatus"####],
+    },
+    Query {
+        query_id: 2,
+        title: "Minimum Cost Supplier Query",
+        statements: &[r####"select
                         s_acctbal,
                         s_name,
                         n_name,
@@ -95,18 +83,12 @@ QUERIES: dict[int, Query] = {
                         n_name,
                         s_name,
                         p_partkey
-                limit 100
-                """
-            ),
-        ),
-    ),
-    3: Query(
-        3,
-        "Shipping Priority Query",
-        (
-            _stmt(
-                """
-                select
+                limit 100"####],
+    },
+    Query {
+        query_id: 3,
+        title: "Shipping Priority Query",
+        statements: &[r####"select
                         l_orderkey,
                         sum(l_extendedprice * (1 - l_discount)) as revenue,
                         o_orderdate,
@@ -128,18 +110,12 @@ QUERIES: dict[int, Query] = {
                 order by
                         revenue desc,
                         o_orderdate
-                limit 10
-                """
-            ),
-        ),
-    ),
-    4: Query(
-        4,
-        "Order Priority Checking Query",
-        (
-            _stmt(
-                """
-                select
+                limit 10"####],
+    },
+    Query {
+        query_id: 4,
+        title: "Order Priority Checking Query",
+        statements: &[r####"select
                         o_orderpriority,
                         count(*) as order_count
                 from
@@ -159,18 +135,12 @@ QUERIES: dict[int, Query] = {
                 group by
                         o_orderpriority
                 order by
-                        o_orderpriority
-                """
-            ),
-        ),
-    ),
-    5: Query(
-        5,
-        "Local Supplier Volume Query",
-        (
-            _stmt(
-                """
-                select
+                        o_orderpriority"####],
+    },
+    Query {
+        query_id: 5,
+        title: "Local Supplier Volume Query",
+        statements: &[r####"select
                         n_name,
                         sum(l_extendedprice * (1 - l_discount)) as revenue
                 from
@@ -193,18 +163,12 @@ QUERIES: dict[int, Query] = {
                 group by
                         n_name
                 order by
-                        revenue desc
-                """
-            ),
-        ),
-    ),
-    6: Query(
-        6,
-        "Forecasting Revenue Change Query",
-        (
-            _stmt(
-                """
-                select
+                        revenue desc"####],
+    },
+    Query {
+        query_id: 6,
+        title: "Forecasting Revenue Change Query",
+        statements: &[r####"select
                         sum(l_extendedprice * l_discount) as revenue
                 from
                         lineitem
@@ -212,18 +176,12 @@ QUERIES: dict[int, Query] = {
                         l_shipdate >= '1994-01-01'
                         and l_shipdate < date_add('1994-01-01', interval 1 year)
                         and l_discount between .06 - 0.01 and .06 + 0.01
-                        and l_quantity < 24
-                """
-            ),
-        ),
-    ),
-    7: Query(
-        7,
-        "Volume Shipping Query",
-        (
-            _stmt(
-                """
-                select
+                        and l_quantity < 24"####],
+    },
+    Query {
+        query_id: 7,
+        title: "Volume Shipping Query",
+        statements: &[r####"select
                         supp_nation,
                         cust_nation,
                         l_year,
@@ -261,18 +219,12 @@ QUERIES: dict[int, Query] = {
                 order by
                         supp_nation,
                         cust_nation,
-                        l_year
-                """
-            ),
-        ),
-    ),
-    8: Query(
-        8,
-        "National Market Share Query",
-        (
-            _stmt(
-                """
-                select
+                        l_year"####],
+    },
+    Query {
+        query_id: 8,
+        title: "National Market Share Query",
+        statements: &[r####"select
                         o_year,
                         sum(case
                                 when nation = 'BRAZIL' then volume
@@ -308,18 +260,12 @@ QUERIES: dict[int, Query] = {
                 group by
                         o_year
                 order by
-                        o_year
-                """
-            ),
-        ),
-    ),
-    9: Query(
-        9,
-        "Product Type Profit Measure Query",
-        (
-            _stmt(
-                """
-                select
+                        o_year"####],
+    },
+    Query {
+        query_id: 9,
+        title: "Product Type Profit Measure Query",
+        statements: &[r####"select
                         nation,
                         o_year,
                         sum(amount) as sum_profit
@@ -350,18 +296,12 @@ QUERIES: dict[int, Query] = {
                         o_year
                 order by
                         nation,
-                        o_year desc
-                """
-            ),
-        ),
-    ),
-    10: Query(
-        10,
-        "Returned Item Reporting Query",
-        (
-            _stmt(
-                """
-                select
+                        o_year desc"####],
+    },
+    Query {
+        query_id: 10,
+        title: "Returned Item Reporting Query",
+        statements: &[r####"select
                         c_custkey,
                         c_name,
                         sum(l_extendedprice * (1 - l_discount)) as revenue,
@@ -392,18 +332,12 @@ QUERIES: dict[int, Query] = {
                         c_comment
                 order by
                         revenue desc
-                limit 20
-                """
-            ),
-        ),
-    ),
-    11: Query(
-        11,
-        "Important Stock Identification Query",
-        (
-            _stmt(
-                """
-                select
+                limit 20"####],
+    },
+    Query {
+        query_id: 11,
+        title: "Important Stock Identification Query",
+        statements: &[r####"select
                         ps_partkey,
                         sum(ps_supplycost * ps_availqty) as value
                 from
@@ -429,18 +363,12 @@ QUERIES: dict[int, Query] = {
                                                 and n_name = 'GERMANY'
                                 )
                 order by
-                        value desc
-                """
-            ),
-        ),
-    ),
-    12: Query(
-        12,
-        "Shipping Modes and Order Priority Query",
-        (
-            _stmt(
-                """
-                select
+                        value desc"####],
+    },
+    Query {
+        query_id: 12,
+        title: "Shipping Modes and Order Priority Query",
+        statements: &[r####"select
                         l_shipmode,
                         sum(case
                                 when o_orderpriority = '1-URGENT'
@@ -467,18 +395,12 @@ QUERIES: dict[int, Query] = {
                 group by
                         l_shipmode
                 order by
-                        l_shipmode
-                """
-            ),
-        ),
-    ),
-    13: Query(
-        13,
-        "Customer Distribution Query",
-        (
-            _stmt(
-                """
-                select
+                        l_shipmode"####],
+    },
+    Query {
+        query_id: 13,
+        title: "Customer Distribution Query",
+        statements: &[r####"select
                         c_count,
                         count(*) as custdist
                 from
@@ -497,18 +419,12 @@ QUERIES: dict[int, Query] = {
                         c_count
                 order by
                         custdist desc,
-                        c_count desc
-                """
-            ),
-        ),
-    ),
-    14: Query(
-        14,
-        "Promotion Effect Query",
-        (
-            _stmt(
-                """
-                select
+                        c_count desc"####],
+    },
+    Query {
+        query_id: 14,
+        title: "Promotion Effect Query",
+        statements: &[r####"select
                         100.00 * sum(case
                                 when p_type like 'PROMO%'
                                         then l_extendedprice * (1 - l_discount)
@@ -520,19 +436,14 @@ QUERIES: dict[int, Query] = {
                 where
                         l_partkey = p_partkey
                         and l_shipdate >= '1995-09-01'
-                        and l_shipdate < date_add('1995-09-01', interval 1 month)
-                """
-            ),
-        ),
-    ),
-    15: Query(
-        15,
-        "Top Supplier Query",
-        (
-            _stmt("drop view if exists revenue0"),
-            _stmt(
-                """
-                create view revenue0 (supplier_no, total_revenue) as
+                        and l_shipdate < date_add('1995-09-01', interval 1 month)"####],
+    },
+    Query {
+        query_id: 15,
+        title: "Top Supplier Query",
+        statements: &[
+            r####"drop view if exists revenue0"####,
+            r####"create view revenue0 (supplier_no, total_revenue) as
                         select
                                 l_suppkey,
                                 sum(l_extendedprice * (1 - l_discount))
@@ -542,12 +453,8 @@ QUERIES: dict[int, Query] = {
                                 l_shipdate >= '1996-01-01'
                                 and l_shipdate < date_add('1996-01-01', interval 3 month)
                         group by
-                                l_suppkey
-                """
-            ),
-            _stmt(
-                """
-                select
+                                l_suppkey"####,
+            r####"select
                         s_suppkey,
                         s_name,
                         s_address,
@@ -565,19 +472,14 @@ QUERIES: dict[int, Query] = {
                                         revenue0
                         )
                 order by
-                        s_suppkey
-                """
-            ),
-            _stmt("drop view revenue0"),
-        ),
-    ),
-    16: Query(
-        16,
-        "Parts/Supplier Relationship Query",
-        (
-            _stmt(
-                """
-                select
+                        s_suppkey"####,
+            r####"drop view revenue0"####,
+        ],
+    },
+    Query {
+        query_id: 16,
+        title: "Parts/Supplier Relationship Query",
+        statements: &[r####"select
                         p_brand,
                         p_type,
                         p_size,
@@ -606,18 +508,12 @@ QUERIES: dict[int, Query] = {
                         supplier_cnt desc,
                         p_brand,
                         p_type,
-                        p_size
-                """
-            ),
-        ),
-    ),
-    17: Query(
-        17,
-        "Small-Quantity-Order Revenue Query",
-        (
-            _stmt(
-                """
-                select
+                        p_size"####],
+    },
+    Query {
+        query_id: 17,
+        title: "Small-Quantity-Order Revenue Query",
+        statements: &[r####"select
                         sum(l_extendedprice) / 7.0 as avg_yearly
                 from
                         lineitem,
@@ -633,18 +529,12 @@ QUERIES: dict[int, Query] = {
                                         lineitem
                                 where
                                         l_partkey = p_partkey
-                        )
-                """
-            ),
-        ),
-    ),
-    18: Query(
-        18,
-        "Large Volume Customer Query",
-        (
-            _stmt(
-                """
-                select
+                        )"####],
+    },
+    Query {
+        query_id: 18,
+        title: "Large Volume Customer Query",
+        statements: &[r####"select
                         c_name,
                         c_custkey,
                         o_orderkey,
@@ -676,18 +566,12 @@ QUERIES: dict[int, Query] = {
                 order by
                         o_totalprice desc,
                         o_orderdate
-                limit 100
-                """
-            ),
-        ),
-    ),
-    19: Query(
-        19,
-        "Discounted Revenue Query",
-        (
-            _stmt(
-                """
-                select
+                limit 100"####],
+    },
+    Query {
+        query_id: 19,
+        title: "Discounted Revenue Query",
+        statements: &[r####"select
                         sum(l_extendedprice* (1 - l_discount)) as revenue
                 from
                         lineitem,
@@ -721,18 +605,12 @@ QUERIES: dict[int, Query] = {
                                 and p_size between 1 and 15
                                 and l_shipmode in ('AIR', 'AIR REG')
                                 and l_shipinstruct = 'DELIVER IN PERSON'
-                        )
-                """
-            ),
-        ),
-    ),
-    20: Query(
-        20,
-        "Potential Part Promotion Query",
-        (
-            _stmt(
-                """
-                select
+                        )"####],
+    },
+    Query {
+        query_id: 20,
+        title: "Potential Part Promotion Query",
+        statements: &[r####"select
                         s_name,
                         s_address
                 from
@@ -768,18 +646,12 @@ QUERIES: dict[int, Query] = {
                         and s_nationkey = n_nationkey
                         and n_name = 'CANADA'
                 order by
-                        s_name
-                """
-            ),
-        ),
-    ),
-    21: Query(
-        21,
-        "Suppliers Who Kept Orders Waiting Query",
-        (
-            _stmt(
-                """
-                select
+                        s_name"####],
+    },
+    Query {
+        query_id: 21,
+        title: "Suppliers Who Kept Orders Waiting Query",
+        statements: &[r####"select
                         s_name,
                         count(*) as numwait
                 from
@@ -818,18 +690,12 @@ QUERIES: dict[int, Query] = {
                 order by
                         numwait desc,
                         s_name
-                limit 100
-                """
-            ),
-        ),
-    ),
-    22: Query(
-        22,
-        "Global Sales Opportunity Query",
-        (
-            _stmt(
-                """
-                select
+                limit 100"####],
+    },
+    Query {
+        query_id: 22,
+        title: "Global Sales Opportunity Query",
+        statements: &[r####"select
                         cntrycode,
                         count(*) as numcust,
                         sum(c_acctbal) as totacctbal
@@ -865,9 +731,6 @@ QUERIES: dict[int, Query] = {
                 group by
                         cntrycode
                 order by
-                        cntrycode
-                """
-            ),
-        ),
-    ),
-}
+                        cntrycode"####],
+    },
+];

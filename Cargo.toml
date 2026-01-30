@@ -1,7 +1,6 @@
 [workspace]
 
-members = ["tpchgen", "tpchgen-cli"]
-exclude = ["tpchgen-py"]
+members = ["tpchgen", "tpchgen-cli", "tpchgen-mysql-cli"]
 
 resolver = "2"
 

@@ -295,12 +295,7 @@ define_run!(
     RegionCsvSource
 );
 
-define_run!(
-    run_part_plan,
-    PartGenerator,
-    PartTblSource,
-    PartCsvSource
-);
+define_run!(run_part_plan, PartGenerator, PartTblSource, PartCsvSource);
 
 define_run!(
     run_supplier_plan,
