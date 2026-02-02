@@ -581,9 +581,19 @@ fn cmd_run(args: RunArgs) -> Result<()> {
     let mut conn = connect_mysql(&args.mysql)?;
 
     if args.precheck {
-        install_precheck_temp_schema(&mut conn)?;
-        precheck_queries(&mut conn, &query_ids, timeout_ms)?;
-        drop_precheck_temp_schema(&mut conn).ok();
+        match install_precheck_temp_schema(&mut conn) {
+            Ok(()) => {
+                precheck_queries(&mut conn, &query_ids, timeout_ms)?;
+                drop_precheck_temp_schema(&mut conn).ok();
+            }
+            Err(e) if should_skip_precheck_due_to_temporary_table_syntax(&e) => {
+                eprintln!(
+                    "warning: precheck disabled because server does not support TEMPORARY TABLE; \
+                     re-run with --no-precheck to silence this warning"
+                );
+            }
+            Err(e) => return Err(e),
+        }
     }
 
     let mut results: Vec<QueryResultRecord> = Vec::with_capacity(query_ids.len());
@@ -664,6 +674,29 @@ fn cmd_run(args: RunArgs) -> Result<()> {
         print!("{json}");
     }
     Ok(())
+}
+
+fn should_skip_precheck_due_to_temporary_table_syntax(err: &anyhow::Error) -> bool {
+    let mut found_syntax_1064 = false;
+    let mut found_temporary = false;
+
+    for cause in err.chain() {
+        if let Some(mysql::Error::MySqlError(e)) = cause.downcast_ref::<mysql::Error>() {
+            if e.code == 1064 && e.message.to_ascii_uppercase().contains("TEMPORARY") {
+                return true;
+            }
+        }
+
+        let msg = cause.to_string();
+        if msg.contains("ERROR 1064") || msg.contains("error 1064") {
+            found_syntax_1064 = true;
+        }
+        if msg.to_ascii_uppercase().contains("TEMPORARY") {
+            found_temporary = true;
+        }
+    }
+
+    found_syntax_1064 && found_temporary
 }
 
 async fn cmd_all(args: AllArgs) -> Result<()> {

@@ -97,6 +97,8 @@ By default, `run` performs a **precheck** step before benchmarking:
   - This does not modify your real tables or data.
   - If anything fails, `run` exits immediately.
 
+If your server does not support `TEMPORARY TABLE` (e.g. some MySQL-compatible systems), use `--no-precheck`.
+
 To skip precheck:
 
 ```bash
