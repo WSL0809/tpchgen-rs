@@ -38,7 +38,7 @@ struct Cli {
 #[derive(Subcommand)]
 enum Command {
     /// Create TPC-H tables in MySQL
-    Schema(MySqlArgs),
+    Schema(SchemaArgs),
 
     /// Generate TPC-H data files (tab-delimited CSV with header by default)
     Gen(GenArgs),
@@ -72,6 +72,16 @@ struct MySqlArgs {
 
     #[arg(long)]
     database: String,
+}
+
+#[derive(Parser, Clone)]
+struct SchemaArgs {
+    #[command(flatten)]
+    mysql: MySqlArgs,
+
+    /// Drop existing TPC-H tables before creating schema
+    #[arg(long, default_value_t = false)]
+    drop_existing: bool,
 }
 
 #[derive(Parser, Clone)]
@@ -128,6 +138,10 @@ struct BenchArgs {
     #[command(flatten)]
     mysql: MySqlArgs,
 
+    /// Drop existing TPC-H tables before creating schema (default: true)
+    #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+    drop_existing: bool,
+
     #[arg(long)]
     data_dir: PathBuf,
 
@@ -170,6 +184,10 @@ struct BenchArgs {
 struct AllArgs {
     #[command(flatten)]
     mysql: MySqlArgs,
+
+    /// Drop existing TPC-H tables before creating schema
+    #[arg(long, default_value_t = false)]
+    drop_existing: bool,
 
     #[arg(long)]
     data_dir: PathBuf,
@@ -493,8 +511,32 @@ fn table_name(table: Table) -> &'static str {
     }
 }
 
-fn cmd_schema(args: MySqlArgs) -> Result<()> {
-    let mut conn = connect_mysql(&args)?;
+fn drop_tpch_tables(conn: &mut Conn) -> Result<()> {
+    // Drop in reverse dependency order (even though schema has no explicit FKs today).
+    const DROP_ORDER: &[Table] = &[
+        Table::Lineitem,
+        Table::Orders,
+        Table::Partsupp,
+        Table::Customer,
+        Table::Supplier,
+        Table::Part,
+        Table::Nation,
+        Table::Region,
+    ];
+
+    for &table in DROP_ORDER {
+        let name = table_name(table);
+        conn.query_drop(format!("DROP TABLE IF EXISTS `{name}`"))
+            .with_context(|| format!("drop table `{name}`"))?;
+    }
+    Ok(())
+}
+
+fn cmd_schema(args: SchemaArgs) -> Result<()> {
+    let mut conn = connect_mysql(&args.mysql)?;
+    if args.drop_existing {
+        drop_tpch_tables(&mut conn)?;
+    }
     run_sql_script(&mut conn, schema::SCHEMA_SQL)?;
     Ok(())
 }
@@ -700,7 +742,10 @@ fn should_skip_precheck_due_to_temporary_table_syntax(err: &anyhow::Error) -> bo
 }
 
 async fn cmd_all(args: AllArgs) -> Result<()> {
-    cmd_schema(args.mysql.clone())?;
+    cmd_schema(SchemaArgs {
+        mysql: args.mysql.clone(),
+        drop_existing: args.drop_existing,
+    })?;
     cmd_gen(GenArgs {
         data_dir: args.data_dir.clone(),
         scale_factor: args.scale_factor,
@@ -812,7 +857,10 @@ fn precheck_rewrite_statement(query_id: u32, stmt: &str) -> String {
 }
 
 async fn cmd_bench(args: BenchArgs) -> Result<()> {
-    cmd_schema(args.mysql.clone())?;
+    cmd_schema(SchemaArgs {
+        mysql: args.mysql.clone(),
+        drop_existing: args.drop_existing,
+    })?;
     cmd_gen(GenArgs {
         data_dir: args.data_dir.clone(),
         scale_factor: args.scale_factor,

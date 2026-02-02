@@ -85,6 +85,7 @@ Run `schema + gen + load (with truncate) + run` in a single command:
 
 By default this:
 
+- drops existing tables before creating schema (`--drop-existing=true`)
 - truncates tables before loading (`--truncate`)
 - writes timings to `./tpch_timings.json`
 - runs a precheck step before benchmarking (see below)
