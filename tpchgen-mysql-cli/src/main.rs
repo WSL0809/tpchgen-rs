@@ -101,6 +101,10 @@ struct GenArgs {
     /// Output delimiter for CSV (default: \\t)
     #[arg(long, default_value = "\\t")]
     delimiter: String,
+
+    /// Overwrite existing generated files (default: true)
+    #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+    overwrite: bool,
 }
 
 #[derive(Parser, Clone)]
@@ -154,6 +158,10 @@ struct BenchArgs {
     /// Output delimiter for generated CSV (default: \\t)
     #[arg(long, default_value = "\\t")]
     delimiter: String,
+
+    /// Overwrite existing generated files (default: true)
+    #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+    overwrite: bool,
 
     /// Ignore this many header lines when loading (default: 1)
     #[arg(long, default_value_t = 1)]
@@ -209,6 +217,10 @@ struct AllArgs {
 
     #[arg(long, default_value = "\\t")]
     delimiter: String,
+
+    /// Overwrite existing generated files (default: true)
+    #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+    overwrite: bool,
 }
 
 #[derive(Parser, Clone)]
@@ -549,7 +561,8 @@ async fn cmd_gen(args: GenArgs) -> Result<()> {
         .with_scale_factor(args.scale_factor)
         .with_output_dir(args.data_dir)
         .with_format(OutputFormat::Csv)
-        .with_csv_delimiter(delimiter);
+        .with_csv_delimiter(delimiter)
+        .with_overwrite_existing_files(args.overwrite);
     if let Some(threads) = args.threads {
         builder = builder.with_num_threads(threads);
     }
@@ -751,6 +764,7 @@ async fn cmd_all(args: AllArgs) -> Result<()> {
         scale_factor: args.scale_factor,
         threads: args.threads,
         delimiter: args.delimiter.clone(),
+        overwrite: args.overwrite,
     })
     .await?;
     cmd_load(LoadArgs {
@@ -866,6 +880,7 @@ async fn cmd_bench(args: BenchArgs) -> Result<()> {
         scale_factor: args.scale_factor,
         threads: args.threads,
         delimiter: args.delimiter.clone(),
+        overwrite: args.overwrite,
     })
     .await?;
     cmd_load(LoadArgs {

@@ -156,6 +156,61 @@ fn test_tpchgen_cli_tbl_no_overwrite() {
     );
 }
 
+/// Test that when creating output, if the file already exists it can be overwritten with --overwrite
+#[test]
+fn test_tpchgen_cli_tbl_overwrite() {
+    let temp_dir = tempdir().expect("Failed to create temporary directory");
+    let expected_file = temp_dir.path().join("part.tbl");
+
+    // First run - create the file
+    Command::cargo_bin("tpchgen-cli")
+        .expect("Binary not found")
+        .arg("--scale-factor")
+        .arg("0.001")
+        .arg("--tables")
+        .arg("part")
+        .arg("--output-dir")
+        .arg(temp_dir.path())
+        .assert()
+        .success();
+
+    // Corrupt the file and ensure overwrite restores it.
+    fs::write(&expected_file, "THIS_IS_NOT_TPCH").expect("Failed to corrupt generated file");
+
+    let output = Command::cargo_bin("tpchgen-cli")
+        .expect("Binary not found")
+        .arg("--scale-factor")
+        .arg("0.001")
+        .arg("--tables")
+        .arg("part")
+        .arg("--output-dir")
+        .arg(temp_dir.path())
+        .arg("--overwrite")
+        .assert()
+        .success();
+
+    let stderr = String::from_utf8_lossy(&output.get_output().stderr);
+    assert!(
+        !stderr.contains("already exists, skipping generation"),
+        "Expected no skip message with --overwrite, but found: {}",
+        stderr
+    );
+
+    let new_metadata =
+        fs::metadata(&expected_file).expect("Failed to get metadata of generated file");
+    assert_eq!(new_metadata.len(), 23498);
+
+    let mut contents = String::new();
+    File::open(&expected_file)
+        .expect("Failed to open generated file")
+        .read_to_string(&mut contents)
+        .expect("Failed to read generated file");
+    assert!(
+        !contents.contains("THIS_IS_NOT_TPCH"),
+        "Expected overwritten file to not contain sentinel"
+    );
+}
+
 /// Test that --quiet flag suppresses stdout output
 #[test]
 fn test_tpchgen_cli_quiet_flag() {

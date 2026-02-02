@@ -21,6 +21,7 @@ pub struct PlanRunner {
     plans: Vec<OutputPlan>,
     num_threads: usize,
     csv_delimiter: u8,
+    overwrite_existing_files: bool,
 }
 
 impl PlanRunner {
@@ -30,7 +31,14 @@ impl PlanRunner {
             plans,
             num_threads,
             csv_delimiter,
+            overwrite_existing_files: false,
         }
+    }
+
+    /// Overwrite existing output files instead of skipping generation.
+    pub fn with_overwrite(mut self, overwrite_existing_files: bool) -> Self {
+        self.overwrite_existing_files = overwrite_existing_files;
+        self
     }
 
     /// Run all the plans in the runner.
@@ -44,6 +52,7 @@ impl PlanRunner {
             mut plans,
             num_threads,
             csv_delimiter,
+            overwrite_existing_files,
         } = self;
 
         // Sort the plans by the number of parts so the largest are first
@@ -56,7 +65,9 @@ impl PlanRunner {
         // Do the actual work in parallel, using a worker queue
         let mut worker_queue = WorkerQueue::new(num_threads);
         while let Some(plan) = plans.pop() {
-            worker_queue.schedule_plan(plan, csv_delimiter).await?;
+            worker_queue
+                .schedule_plan(plan, csv_delimiter, overwrite_existing_files)
+                .await?;
         }
         worker_queue.join_all().await
     }
@@ -102,7 +113,12 @@ impl WorkerQueue {
     /// Note this algorithm does not guarantee that all threads are always busy,
     /// but it should be good enough for most cases. For best thread utilization
     /// spawn the largest plans first.
-    pub async fn schedule_plan(&mut self, plan: OutputPlan, csv_delimiter: u8) -> io::Result<()> {
+    pub async fn schedule_plan(
+        &mut self,
+        plan: OutputPlan,
+        csv_delimiter: u8,
+        overwrite_existing_files: bool,
+    ) -> io::Result<()> {
         debug!("scheduling plan {plan}");
         loop {
             if self.available_threads == 0 {
@@ -136,8 +152,15 @@ impl WorkerQueue {
             // run the plan in a separate task, which returns the number of threads it used
             debug!("Spawning plan {plan} with {num_plan_threads} threads");
 
-            self.join_set
-                .spawn(async move { run_plan(plan, num_plan_threads, csv_delimiter).await });
+            self.join_set.spawn(async move {
+                run_plan(
+                    plan,
+                    num_plan_threads,
+                    csv_delimiter,
+                    overwrite_existing_files,
+                )
+                .await
+            });
             self.available_threads -= num_plan_threads;
             return Ok(());
         }
@@ -160,21 +183,47 @@ fn task_result<T>(result: Result<io::Result<T>, JoinError>) -> io::Result<T> {
 }
 
 /// Run a single [`OutputPlan`]
-async fn run_plan(plan: OutputPlan, num_threads: usize, csv_delimiter: u8) -> io::Result<usize> {
+async fn run_plan(
+    plan: OutputPlan,
+    num_threads: usize,
+    csv_delimiter: u8,
+    overwrite_existing_files: bool,
+) -> io::Result<usize> {
     match plan.table() {
-        Table::Nation => run_nation_plan(plan, num_threads, csv_delimiter).await,
-        Table::Region => run_region_plan(plan, num_threads, csv_delimiter).await,
-        Table::Part => run_part_plan(plan, num_threads, csv_delimiter).await,
-        Table::Supplier => run_supplier_plan(plan, num_threads, csv_delimiter).await,
-        Table::Partsupp => run_partsupp_plan(plan, num_threads, csv_delimiter).await,
-        Table::Customer => run_customer_plan(plan, num_threads, csv_delimiter).await,
-        Table::Orders => run_orders_plan(plan, num_threads, csv_delimiter).await,
-        Table::Lineitem => run_lineitem_plan(plan, num_threads, csv_delimiter).await,
+        Table::Nation => {
+            run_nation_plan(plan, num_threads, csv_delimiter, overwrite_existing_files).await
+        }
+        Table::Region => {
+            run_region_plan(plan, num_threads, csv_delimiter, overwrite_existing_files).await
+        }
+        Table::Part => {
+            run_part_plan(plan, num_threads, csv_delimiter, overwrite_existing_files).await
+        }
+        Table::Supplier => {
+            run_supplier_plan(plan, num_threads, csv_delimiter, overwrite_existing_files).await
+        }
+        Table::Partsupp => {
+            run_partsupp_plan(plan, num_threads, csv_delimiter, overwrite_existing_files).await
+        }
+        Table::Customer => {
+            run_customer_plan(plan, num_threads, csv_delimiter, overwrite_existing_files).await
+        }
+        Table::Orders => {
+            run_orders_plan(plan, num_threads, csv_delimiter, overwrite_existing_files).await
+        }
+        Table::Lineitem => {
+            run_lineitem_plan(plan, num_threads, csv_delimiter, overwrite_existing_files).await
+        }
     }
 }
 
 /// Writes a CSV/TSV output from the sources
-async fn write_file<I>(plan: OutputPlan, num_threads: usize, sources: I) -> Result<(), io::Error>
+async fn write_file<I>(
+    plan: OutputPlan,
+    num_threads: usize,
+    sources: I,
+    overwrite_existing_files: bool,
+) -> Result<(), io::Error>
 where
     I: Iterator<Item: Source> + 'static,
 {
@@ -187,7 +236,7 @@ where
         }
         OutputLocation::File(path) => {
             // if the output already exists, skip running
-            if path.exists() {
+            if path.exists() && !overwrite_existing_files {
                 log::warn!("{} already exists, skipping generation", path.display());
                 return Ok(());
             }
@@ -199,11 +248,24 @@ where
             let sink = WriterSink::new(file);
             generate_in_chunks(sink, sources, num_threads).await?;
             // rename the temp file to the final path
-            std::fs::rename(&temp_path, path).map_err(|e| {
-                io::Error::other(format!(
-                    "Failed to rename {temp_path:?} to {path:?} file: {e}"
-                ))
-            })?;
+            if let Err(e) = std::fs::rename(&temp_path, path) {
+                if overwrite_existing_files && path.exists() {
+                    std::fs::remove_file(path).map_err(|remove_err| {
+                        io::Error::other(format!(
+                            "Failed to remove existing {path:?} after rename failed: {remove_err}"
+                        ))
+                    })?;
+                    std::fs::rename(&temp_path, path).map_err(|rename_err| {
+                        io::Error::other(format!(
+                            "Failed to rename {temp_path:?} to {path:?} file: {rename_err}"
+                        ))
+                    })?;
+                } else {
+                    return Err(io::Error::other(format!(
+                        "Failed to rename {temp_path:?} to {path:?} file: {e}"
+                    )));
+                }
+            }
             Ok(())
         }
     }
@@ -222,6 +284,7 @@ macro_rules! define_run {
             plan: OutputPlan,
             num_threads: usize,
             csv_delimiter: u8,
+            overwrite_existing_files: bool,
         ) -> io::Result<usize> {
             use crate::GenerationPlan;
             let scale_factor = plan.scale_factor();
@@ -262,11 +325,11 @@ macro_rules! define_run {
             match plan.output_format() {
                 OutputFormat::Tbl => {
                     let gens = tbl_sources(plan.generation_plan(), scale_factor);
-                    write_file(plan, num_threads, gens).await?
+                    write_file(plan, num_threads, gens, overwrite_existing_files).await?
                 }
                 OutputFormat::Csv => {
                     let gens = csv_sources(plan.generation_plan(), scale_factor, csv_delimiter);
-                    write_file(plan, num_threads, gens).await?
+                    write_file(plan, num_threads, gens, overwrite_existing_files).await?
                 }
             };
             Ok(num_threads)

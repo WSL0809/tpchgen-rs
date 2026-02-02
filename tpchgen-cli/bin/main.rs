@@ -90,6 +90,10 @@ struct Cli {
     /// Write the output to stdout instead of a file.
     #[arg(long, default_value_t = false)]
     stdout: bool,
+
+    /// Overwrite existing output files instead of skipping generation
+    #[arg(long, default_value_t = false)]
+    overwrite: bool,
 }
 
 // TableValueParser is CLI-specific and uses the Table type from the library
@@ -179,7 +183,8 @@ impl Cli {
             .with_format(self.format)
             .with_csv_delimiter(csv_delimiter)
             .with_num_threads(self.num_threads)
-            .with_stdout(self.stdout);
+            .with_stdout(self.stdout)
+            .with_overwrite_existing_files(self.overwrite);
 
         // Add tables if specified
         if let Some(tables) = self.tables {

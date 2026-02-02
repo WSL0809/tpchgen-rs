@@ -266,6 +266,8 @@ pub struct GeneratorConfig {
     pub part: Option<i32>,
     /// Write output to stdout instead of files
     pub stdout: bool,
+    /// Overwrite existing output files instead of skipping generation
+    pub overwrite: bool,
 }
 
 impl Default for GeneratorConfig {
@@ -280,6 +282,7 @@ impl Default for GeneratorConfig {
             parts: None,
             part: None,
             stdout: false,
+            overwrite: false,
         }
     }
 }
@@ -406,6 +409,7 @@ impl TpchGenerator {
 
         // Run
         let runner = PlanRunner::new(output_plans, config.num_threads, config.csv_delimiter);
+        let runner = runner.with_overwrite(config.overwrite);
         runner.run().await?;
         info!("Generation complete!");
         Ok(())
@@ -522,6 +526,12 @@ impl TpchGeneratorBuilder {
     /// Write output to stdout instead of files
     pub fn with_stdout(mut self, stdout: bool) -> Self {
         self.config.stdout = stdout;
+        self
+    }
+
+    /// Overwrite existing output files instead of skipping generation
+    pub fn with_overwrite_existing_files(mut self, overwrite: bool) -> Self {
+        self.config.overwrite = overwrite;
         self
     }
 
