@@ -19,6 +19,30 @@ cargo build -p tpchgen-mysql-cli --release
 
 Binary: `target/release/tpch-mysql`
 
+## Portable Linux (static) build
+
+If you copy a Linux build to another machine and see errors like `GLIBC_2.xx not found`, build a
+statically-linked musl binary instead.
+
+### Option A: Docker (recommended)
+
+From the repo root:
+
+```bash
+./scripts/build-tpch-mysql-static-linux.sh
+```
+
+Output: `target/x86_64-unknown-linux-musl/release/tpch-mysql`
+
+### Option B: Native on Linux
+
+Install musl tooling + target, then build:
+
+```bash
+rustup target add x86_64-unknown-linux-musl
+cargo build -p tpchgen-mysql-cli --release --locked --target x86_64-unknown-linux-musl
+```
+
 ## Usage
 
 ```bash
