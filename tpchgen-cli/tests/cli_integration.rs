@@ -133,6 +133,7 @@ fn test_tpchgen_cli_tbl_no_overwrite() {
         .arg("part")
         .arg("--output-dir")
         .arg(temp_dir.path())
+        .arg("--overwrite=false")
         .assert()
         .success();
 
@@ -156,7 +157,7 @@ fn test_tpchgen_cli_tbl_no_overwrite() {
     );
 }
 
-/// Test that when creating output, if the file already exists it can be overwritten with --overwrite
+/// Test that when creating output, if the file already exists it can be overwritten
 #[test]
 fn test_tpchgen_cli_tbl_overwrite() {
     let temp_dir = tempdir().expect("Failed to create temporary directory");
@@ -185,7 +186,7 @@ fn test_tpchgen_cli_tbl_overwrite() {
         .arg("part")
         .arg("--output-dir")
         .arg(temp_dir.path())
-        .arg("--overwrite")
+        .arg("--overwrite=true")
         .assert()
         .success();
 
@@ -243,6 +244,7 @@ fn test_tpchgen_cli_quiet_flag() {
         .arg("part")
         .arg("--output-dir")
         .arg(temp_dir.path())
+        .arg("--overwrite=false")
         .arg("--quiet")
         .assert()
         .success();

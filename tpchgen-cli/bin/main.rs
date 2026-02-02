@@ -92,7 +92,7 @@ struct Cli {
     stdout: bool,
 
     /// Overwrite existing output files instead of skipping generation
-    #[arg(long, default_value_t = false)]
+    #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
     overwrite: bool,
 }
 
