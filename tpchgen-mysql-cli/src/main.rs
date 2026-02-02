@@ -429,7 +429,7 @@ fn load_data_local_infile(
     let lines = mysql_delimiter_literal(line_terminated_by);
     let sql = format!(
         "LOAD DATA LOCAL INFILE '{infile}' INTO TABLE `{table}` \
-         FIELDS TERMINATED BY '{fields}' OPTIONALLY ENCLOSED BY '\"' ESCAPED BY '\"' \
+         FIELDS TERMINATED BY '{fields}' \
          LINES TERMINATED BY '{lines}' \
          IGNORE {ignore_header_lines} LINES"
     );
