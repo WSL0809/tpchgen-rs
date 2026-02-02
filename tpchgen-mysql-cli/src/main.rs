@@ -4,6 +4,7 @@ use mysql::prelude::Queryable;
 use mysql::{Conn, LocalInfileHandler, OptsBuilder};
 use serde::Serialize;
 use std::collections::HashMap;
+use std::io::IsTerminal;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -292,6 +293,174 @@ struct ProcRssSampler {
     stop: Arc<AtomicBool>,
     stats: Arc<Mutex<ProcMemStats>>,
     handle: Option<JoinHandle<()>>,
+}
+
+fn should_print_terminal_summary() -> bool {
+    std::io::stderr().is_terminal()
+}
+
+fn format_seconds(seconds: f64) -> String {
+    if seconds < 1.0 {
+        format!("{:.0}ms", seconds * 1000.0)
+    } else if seconds < 10.0 {
+        format!("{seconds:.3}s")
+    } else {
+        format!("{seconds:.2}s")
+    }
+}
+
+fn format_kb(kb: u64) -> String {
+    let mib = kb as f64 / 1024.0;
+    if mib < 1024.0 {
+        format!("{mib:.1}MiB")
+    } else {
+        format!("{:.2}GiB", mib / 1024.0)
+    }
+}
+
+fn format_kb_delta(end_kb: u64, start_kb: u64) -> String {
+    let delta = end_kb as i64 - start_kb as i64;
+    if delta == 0 {
+        "0".to_string()
+    } else if delta > 0 {
+        format!("+{}", format_kb(delta as u64))
+    } else {
+        format!("-{}", format_kb((-delta) as u64))
+    }
+}
+
+fn format_query_compact_line(r: &QueryResultRecord) -> String {
+    let status = if r.ok { "OK " } else { "ERR" };
+    let mut out = format!(
+        "Q{:02} {status} {:>8} rows={}",
+        r.query_id,
+        format_seconds(r.seconds),
+        r.rows
+    );
+
+    if let (Some(start), Some(end), Some(peak)) = (
+        r.monitor_rss_start_kb,
+        r.monitor_rss_end_kb,
+        r.monitor_rss_peak_kb,
+    ) {
+        out.push_str(&format!(
+            " rssΔ={} rssPeak={}",
+            format_kb_delta(end, start),
+            format_kb(peak)
+        ));
+    }
+
+    out.push_str(&format!("  {}", r.title));
+    if let Some(err) = r.error.as_deref() {
+        out.push_str(&format!("  ({})", err.lines().next().unwrap_or(err)));
+    }
+    out
+}
+
+fn print_query_compact_line(r: &QueryResultRecord) {
+    eprintln!("{}", format_query_compact_line(r));
+}
+
+fn print_results_summary_table(results: &[QueryResultRecord]) {
+    if results.is_empty() {
+        return;
+    }
+
+    let has_monitor = results.iter().any(|r| r.monitor_pid.is_some());
+    let mut rows: Vec<Vec<String>> = Vec::with_capacity(results.len());
+
+    for r in results {
+        let mut cols = vec![
+            format!("Q{:02}", r.query_id),
+            if r.ok {
+                "OK".to_string()
+            } else {
+                "ERR".to_string()
+            },
+            format_seconds(r.seconds),
+            r.rows.to_string(),
+        ];
+        if has_monitor {
+            let rss_delta = match (r.monitor_rss_start_kb, r.monitor_rss_end_kb) {
+                (Some(start), Some(end)) => format_kb_delta(end, start),
+                _ => "-".to_string(),
+            };
+            let rss_peak = r
+                .monitor_rss_peak_kb
+                .map(format_kb)
+                .unwrap_or_else(|| "-".to_string());
+            cols.push(rss_delta);
+            cols.push(rss_peak);
+        }
+        cols.push(r.title.to_string());
+        rows.push(cols);
+    }
+
+    let headers: Vec<&str> = if has_monitor {
+        vec!["Q", "OK", "Time", "Rows", "RSSΔ", "RSSPeak", "Title"]
+    } else {
+        vec!["Q", "OK", "Time", "Rows", "Title"]
+    };
+
+    let mut widths: Vec<usize> = headers.iter().map(|h| h.len()).collect();
+    for row in &rows {
+        for (idx, col) in row.iter().enumerate() {
+            widths[idx] = widths[idx].max(col.len());
+        }
+    }
+
+    let mut line = String::new();
+    for (idx, h) in headers.iter().enumerate() {
+        if idx == headers.len() - 1 {
+            line.push_str(&format!("{:<w$}", h, w = widths[idx]));
+        } else if idx == 4 && has_monitor {
+            // RSS columns: right-align.
+            line.push_str(&format!("{:>w$}  ", h, w = widths[idx]));
+        } else if idx <= 3 {
+            // Numeric-ish columns: right-align.
+            line.push_str(&format!("{:>w$}  ", h, w = widths[idx]));
+        } else {
+            line.push_str(&format!("{:<w$}  ", h, w = widths[idx]));
+        }
+    }
+    eprintln!("\n{line}");
+    eprintln!("{}", "-".repeat(line.len().max(8)));
+
+    for row in &rows {
+        let mut line = String::new();
+        for (idx, col) in row.iter().enumerate() {
+            if idx == row.len() - 1 {
+                line.push_str(&format!("{:<w$}", col, w = widths[idx]));
+            } else if has_monitor && (idx == 4 || idx == 5) {
+                line.push_str(&format!("{:>w$}  ", col, w = widths[idx]));
+            } else if idx <= 3 {
+                line.push_str(&format!("{:>w$}  ", col, w = widths[idx]));
+            } else {
+                line.push_str(&format!("{:<w$}  ", col, w = widths[idx]));
+            }
+        }
+        eprintln!("{line}");
+    }
+
+    let total_seconds: f64 = results.iter().map(|r| r.seconds).sum();
+    let ok_count = results.iter().filter(|r| r.ok).count();
+    let mut slowest = results[0].query_id;
+    let mut slowest_s = results[0].seconds;
+    for r in results.iter().skip(1) {
+        if r.seconds > slowest_s {
+            slowest_s = r.seconds;
+            slowest = r.query_id;
+        }
+    }
+    eprintln!(
+        "\nsummary: {} queries, ok={}/{}, total={}, slowest=Q{:02} ({})",
+        results.len(),
+        ok_count,
+        results.len(),
+        format_seconds(total_seconds),
+        slowest,
+        format_seconds(slowest_s)
+    );
 }
 
 impl ProcRssSampler {
@@ -633,6 +802,7 @@ fn cmd_run(args: RunArgs) -> Result<()> {
         Some(args.timeout_seconds * 1000)
     };
 
+    let print_summary = should_print_terminal_summary();
     let mut conn = connect_mysql(&args.mysql)?;
 
     if args.precheck {
@@ -720,11 +890,22 @@ fn cmd_run(args: RunArgs) -> Result<()> {
         }
 
         results.push(record);
+        if print_summary {
+            let last = results.last().expect("just pushed");
+            print_query_compact_line(last);
+        }
+    }
+
+    if print_summary {
+        print_results_summary_table(&results);
     }
 
     let json = serde_json::to_string_pretty(&results).context("serialize results")? + "\n";
-    if let Some(path) = args.output {
-        std::fs::write(&path, json).with_context(|| format!("write {}", path.display()))?;
+    if let Some(path) = &args.output {
+        std::fs::write(path, json).with_context(|| format!("write {}", path.display()))?;
+        if print_summary {
+            eprintln!("wrote results to {}", path.display());
+        }
     } else {
         print!("{json}");
     }
