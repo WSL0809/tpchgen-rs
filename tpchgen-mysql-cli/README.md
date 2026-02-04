@@ -80,7 +80,8 @@ Run `schema + gen + load (with truncate) + run` in a single command:
 ./target/release/tpch-mysql bench \\
   --host 127.0.0.1 --port 3307 --user root --password 123123 --database dingo \\
   --data-dir /tmp/tpch --scale-factor 0.001 \\
-  --monitor-pid <pid>
+  --monitor-pid <pid> \\
+  --query 1,6,19
 ```
 
 By default this:
@@ -88,6 +89,7 @@ By default this:
 - drops existing tables before creating schema (`--drop-existing=true`)
 - truncates tables before loading (`--truncate`)
 - writes timings to `./tpch_timings.json`
+- runs all queries (Q1..Q22); pass `--query ...` to run a subset, or `--all` explicitly
 - runs a precheck step before benchmarking (see below)
 
 ### Query precheck

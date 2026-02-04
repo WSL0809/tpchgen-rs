@@ -180,6 +180,14 @@ struct BenchArgs {
     #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
     precheck: bool,
 
+    /// Run Q1..Q22
+    #[arg(long, default_value_t = false, conflicts_with = "query")]
+    all: bool,
+
+    /// Query ids (repeatable or comma-separated), e.g. --query 1 --query 6,19
+    #[arg(long, action = clap::ArgAction::Append, value_delimiter = ',')]
+    query: Vec<u32>,
+
     /// Write JSON results to this path (default: ./tpch_timings.json)
     #[arg(long, default_value = "tpch_timings.json")]
     output: PathBuf,
@@ -1073,11 +1081,19 @@ async fn cmd_bench(args: BenchArgs) -> Result<()> {
         field_terminated_by: args.delimiter,
         line_terminated_by: "\\n".to_string(),
     })?;
+
+    // Keep existing behavior: if neither --all nor --query is provided, run all queries.
+    let (all, query) = if !args.all && args.query.is_empty() {
+        (true, vec![])
+    } else {
+        (args.all, args.query)
+    };
+
     cmd_run(RunArgs {
         mysql: args.mysql,
         precheck: args.precheck,
-        all: true,
-        query: vec![],
+        all,
+        query,
         timeout_seconds: args.timeout_seconds,
         output: Some(args.output),
         monitor_pid: args.monitor_pid,
