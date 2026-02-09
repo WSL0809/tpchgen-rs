@@ -90,6 +90,8 @@ By default this:
 - truncates tables before loading (`--truncate`)
 - sleeps 30 minutes between load and run (`--sleep-seconds`, set to `0` to disable)
 - writes timings to `./tpch_timings.json`
+- runs each selected query 3 times and uses the average `seconds` as the final benchmark result
+- keeps per-run details under each result's `runs` field in JSON output
 - runs all queries (Q1..Q22); pass `--query ...` to run a subset, or `--all` explicitly
 - runs a precheck step before benchmarking (see below)
 

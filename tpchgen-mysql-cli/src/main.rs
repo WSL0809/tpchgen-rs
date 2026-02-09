@@ -26,6 +26,7 @@ const TABLES: &[Table] = &[
     Table::Orders,
     Table::Lineitem,
 ];
+const BENCH_RUNS: usize = 3;
 
 #[derive(Parser)]
 #[command(name = "tpch-mysql")]
@@ -269,6 +270,25 @@ struct RunArgs {
 }
 
 #[derive(Serialize)]
+struct QueryAttemptRecord {
+    ok: bool,
+    seconds: f64,
+    rows: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    monitor_rss_start_kb: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    monitor_rss_end_kb: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    monitor_rss_peak_kb: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    monitor_samples: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    monitor_error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+}
+
+#[derive(Serialize)]
 struct QueryResultRecord {
     query_id: u32,
     title: &'static str,
@@ -289,6 +309,24 @@ struct QueryResultRecord {
     monitor_error: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    runs: Option<Vec<QueryAttemptRecord>>,
+}
+
+impl From<QueryResultRecord> for QueryAttemptRecord {
+    fn from(record: QueryResultRecord) -> Self {
+        Self {
+            ok: record.ok,
+            seconds: record.seconds,
+            rows: record.rows,
+            monitor_rss_start_kb: record.monitor_rss_start_kb,
+            monitor_rss_end_kb: record.monitor_rss_end_kb,
+            monitor_rss_peak_kb: record.monitor_rss_peak_kb,
+            monitor_samples: record.monitor_samples,
+            monitor_error: record.monitor_error,
+            error: record.error,
+        }
+    }
 }
 
 #[derive(Debug, Default, Clone)]
@@ -793,60 +831,74 @@ fn cmd_load(args: LoadArgs) -> Result<()> {
     Ok(())
 }
 
-fn cmd_run(args: RunArgs) -> Result<()> {
-    if !args.all && args.query.is_empty() {
+fn query_ids_from_args(all: bool, query: &[u32], default_all: bool) -> Result<Vec<u32>> {
+    if !all && query.is_empty() {
+        if default_all {
+            return Ok((1..=22).collect());
+        }
         bail!("either --all or --query must be set");
     }
-    let query_ids: Vec<u32> = if args.all {
-        (1..=22).collect()
-    } else {
-        args.query.clone()
-    };
+
+    let query_ids = if all { (1..=22).collect() } else { query.to_vec() };
     for &qid in &query_ids {
         if queries::get_query(qid).is_none() {
             bail!("unknown query id: {qid}");
         }
     }
+    Ok(query_ids)
+}
 
-    let timeout_ms = if args.timeout_seconds == 0 {
+fn timeout_seconds_to_millis(timeout_seconds: u64) -> Option<u64> {
+    if timeout_seconds == 0 {
         None
     } else {
-        Some(args.timeout_seconds * 1000)
-    };
+        Some(timeout_seconds * 1000)
+    }
+}
 
-    let print_summary = should_print_terminal_summary();
-    let mut conn = connect_mysql(&args.mysql)?;
-
-    if args.precheck {
-        match install_precheck_temp_schema(&mut conn) {
-            Ok(()) => {
-                precheck_queries(&mut conn, &query_ids, timeout_ms)?;
-                drop_precheck_temp_schema(&mut conn).ok();
-            }
-            Err(e) if should_skip_precheck_due_to_temporary_table_syntax(&e) => {
-                eprintln!(
-                    "warning: precheck disabled because server does not support TEMPORARY TABLE; \
-                     re-run with --no-precheck to silence this warning"
-                );
-            }
-            Err(e) => return Err(e),
-        }
+fn run_precheck_if_enabled(
+    conn: &mut Conn,
+    enabled: bool,
+    query_ids: &[u32],
+    timeout_ms: Option<u64>,
+) -> Result<()> {
+    if !enabled {
+        return Ok(());
     }
 
+    match install_precheck_temp_schema(conn) {
+        Ok(()) => {
+            precheck_queries(conn, query_ids, timeout_ms)?;
+            drop_precheck_temp_schema(conn).ok();
+        }
+        Err(e) if should_skip_precheck_due_to_temporary_table_syntax(&e) => {
+            eprintln!(
+                "warning: precheck disabled because server does not support TEMPORARY TABLE; \
+                 re-run with --no-precheck to silence this warning"
+            );
+        }
+        Err(e) => return Err(e),
+    }
+
+    Ok(())
+}
+
+fn execute_query_set(
+    conn: &mut Conn,
+    query_ids: &[u32],
+    timeout_ms: Option<u64>,
+    monitor_pid: Option<u32>,
+    print_compact: bool,
+    line_prefix: Option<&str>,
+) -> Result<Vec<QueryResultRecord>> {
     let mut results: Vec<QueryResultRecord> = Vec::with_capacity(query_ids.len());
-    for qid in query_ids {
+    for &qid in query_ids {
         let q = queries::get_query(qid).expect("validated above");
         let start = Instant::now();
-        let sampler = args
-            .monitor_pid
+        let sampler = monitor_pid
             .map(|pid| ProcRssSampler::start(pid, Duration::from_millis(50)))
             .transpose()
-            .with_context(|| {
-                format!(
-                    "start proc monitor (pid={})",
-                    args.monitor_pid.expect("set above")
-                )
-            })?;
+            .with_context(|| format!("start proc monitor (pid={})", monitor_pid.expect("set")))?;
         let mut rows: u64 = 0;
 
         let mut record = QueryResultRecord {
@@ -855,17 +907,18 @@ fn cmd_run(args: RunArgs) -> Result<()> {
             ok: false,
             seconds: 0.0,
             rows: 0,
-            monitor_pid: args.monitor_pid,
+            monitor_pid,
             monitor_rss_start_kb: None,
             monitor_rss_end_kb: None,
             monitor_rss_peak_kb: None,
             monitor_samples: None,
             monitor_error: None,
             error: None,
+            runs: None,
         };
 
         let exec_res: Result<()> = (|| {
-            try_set_session_max_execution_time(&mut conn, timeout_ms)?;
+            try_set_session_max_execution_time(conn, timeout_ms)?;
             for &stmt in q.statements {
                 let stmt = apply_max_execution_time_hint(stmt, timeout_ms);
                 if is_select_statement(&stmt) {
@@ -901,19 +954,83 @@ fn cmd_run(args: RunArgs) -> Result<()> {
             }
         }
 
+        if print_compact {
+            match line_prefix {
+                Some(prefix) => eprintln!("{prefix}{}", format_query_compact_line(&record)),
+                None => print_query_compact_line(&record),
+            }
+        }
+
         results.push(record);
-        if print_summary {
-            let last = results.last().expect("just pushed");
-            print_query_compact_line(last);
+    }
+    Ok(results)
+}
+
+fn aggregate_bench_results(
+    query_ids: &[u32],
+    run_results: Vec<Vec<QueryResultRecord>>,
+) -> Result<Vec<QueryResultRecord>> {
+    if run_results.is_empty() {
+        bail!("no bench run results to aggregate");
+    }
+
+    let run_count = run_results.len();
+    let mut grouped: HashMap<u32, Vec<QueryResultRecord>> = HashMap::new();
+    for run in run_results {
+        for record in run {
+            grouped.entry(record.query_id).or_default().push(record);
         }
     }
 
-    if print_summary {
-        print_results_summary_table(&results);
+    let mut averaged: Vec<QueryResultRecord> = Vec::with_capacity(query_ids.len());
+    for &qid in query_ids {
+        let mut attempts = grouped
+            .remove(&qid)
+            .ok_or_else(|| anyhow::anyhow!("missing query result for Q{qid:02}"))?;
+        if attempts.len() != run_count {
+            bail!(
+                "query Q{qid:02} has {} run(s), expected {run_count}",
+                attempts.len()
+            );
+        }
+
+        let title = attempts[0].title;
+        let seconds = attempts.iter().map(|r| r.seconds).sum::<f64>() / run_count as f64;
+        let ok = attempts.iter().all(|r| r.ok);
+        let rows = attempts[0].rows;
+        let error = attempts.iter().find_map(|r| r.error.clone());
+        let runs = attempts
+            .drain(..)
+            .map(QueryAttemptRecord::from)
+            .collect::<Vec<_>>();
+
+        averaged.push(QueryResultRecord {
+            query_id: qid,
+            title,
+            ok,
+            seconds,
+            rows,
+            monitor_pid: None,
+            monitor_rss_start_kb: None,
+            monitor_rss_end_kb: None,
+            monitor_rss_peak_kb: None,
+            monitor_samples: None,
+            monitor_error: None,
+            error,
+            runs: Some(runs),
+        });
     }
 
-    let json = serde_json::to_string_pretty(&results).context("serialize results")? + "\n";
-    if let Some(path) = &args.output {
+    if !grouped.is_empty() {
+        bail!("unexpected query results found during bench aggregation");
+    }
+
+    Ok(averaged)
+}
+
+fn write_results(results: &[QueryResultRecord], output: Option<&PathBuf>, print_summary: bool) -> Result<()> {
+    let json = serde_json::to_string_pretty(results).context("serialize results")? + "\n";
+    if let Some(path) = output {
         std::fs::write(path, json).with_context(|| format!("write {}", path.display()))?;
         if print_summary {
             eprintln!("wrote results to {}", path.display());
@@ -922,6 +1039,28 @@ fn cmd_run(args: RunArgs) -> Result<()> {
         print!("{json}");
     }
     Ok(())
+}
+
+fn cmd_run(args: RunArgs) -> Result<()> {
+    let query_ids = query_ids_from_args(args.all, &args.query, false)?;
+    let timeout_ms = timeout_seconds_to_millis(args.timeout_seconds);
+
+    let print_summary = should_print_terminal_summary();
+    let mut conn = connect_mysql(&args.mysql)?;
+    run_precheck_if_enabled(&mut conn, args.precheck, &query_ids, timeout_ms)?;
+    let results = execute_query_set(
+        &mut conn,
+        &query_ids,
+        timeout_ms,
+        args.monitor_pid,
+        print_summary,
+        None,
+    )?;
+
+    if print_summary {
+        print_results_summary_table(&results);
+    }
+    write_results(&results, args.output.as_ref(), print_summary)
 }
 
 fn should_skip_precheck_due_to_temporary_table_syntax(err: &anyhow::Error) -> bool {
@@ -1094,22 +1233,32 @@ async fn cmd_bench(args: BenchArgs) -> Result<()> {
         std::thread::sleep(Duration::from_secs(args.sleep_seconds));
     }
 
-    // Keep existing behavior: if neither --all nor --query is provided, run all queries.
-    let (all, query) = if !args.all && args.query.is_empty() {
-        (true, vec![])
-    } else {
-        (args.all, args.query)
-    };
+    let query_ids = query_ids_from_args(args.all, &args.query, true)?;
+    let timeout_ms = timeout_seconds_to_millis(args.timeout_seconds);
+    let print_summary = should_print_terminal_summary();
+    let mut conn = connect_mysql(&args.mysql)?;
 
-    cmd_run(RunArgs {
-        mysql: args.mysql,
-        precheck: args.precheck,
-        all,
-        query,
-        timeout_seconds: args.timeout_seconds,
-        output: Some(args.output),
-        monitor_pid: args.monitor_pid,
-    })
+    run_precheck_if_enabled(&mut conn, args.precheck, &query_ids, timeout_ms)?;
+
+    let mut run_results: Vec<Vec<QueryResultRecord>> = Vec::with_capacity(BENCH_RUNS);
+    for run_idx in 0..BENCH_RUNS {
+        let line_prefix = format!("[run {}/{}] ", run_idx + 1, BENCH_RUNS);
+        let results = execute_query_set(
+            &mut conn,
+            &query_ids,
+            timeout_ms,
+            args.monitor_pid,
+            print_summary,
+            Some(&line_prefix),
+        )?;
+        run_results.push(results);
+    }
+
+    let averaged_results = aggregate_bench_results(&query_ids, run_results)?;
+    if print_summary {
+        print_results_summary_table(&averaged_results);
+    }
+    write_results(&averaged_results, Some(&args.output), print_summary)
 }
 
 #[cfg(test)]
@@ -1129,5 +1278,55 @@ mod tests {
         assert!(is_select_statement("select 1"));
         assert!(is_select_statement(" with t as (select 1) select * from t"));
         assert!(!is_select_statement("create view v as select 1"));
+    }
+
+    fn sample_record(query_id: u32, seconds: f64, ok: bool, rows: u64, error: Option<&str>) -> QueryResultRecord {
+        QueryResultRecord {
+            query_id,
+            title: "sample",
+            ok,
+            seconds,
+            rows,
+            monitor_pid: Some(123),
+            monitor_rss_start_kb: Some(100),
+            monitor_rss_end_kb: Some(110),
+            monitor_rss_peak_kb: Some(120),
+            monitor_samples: Some(3),
+            monitor_error: None,
+            error: error.map(str::to_string),
+            runs: None,
+        }
+    }
+
+    #[test]
+    fn test_aggregate_bench_results_mean_seconds() {
+        let qids = vec![1];
+        let runs = vec![
+            vec![sample_record(1, 1.0, true, 10, None)],
+            vec![sample_record(1, 2.0, true, 10, None)],
+            vec![sample_record(1, 3.0, true, 10, None)],
+        ];
+        let out = aggregate_bench_results(&qids, runs).expect("aggregate");
+        assert_eq!(out.len(), 1);
+        let r = &out[0];
+        assert!(r.ok);
+        assert_eq!(r.seconds, 2.0);
+        assert!(r.runs.as_ref().is_some_and(|v| v.len() == 3));
+    }
+
+    #[test]
+    fn test_aggregate_bench_results_propagates_failure() {
+        let qids = vec![1];
+        let runs = vec![
+            vec![sample_record(1, 1.0, true, 10, None)],
+            vec![sample_record(1, 2.0, false, 0, Some("boom"))],
+            vec![sample_record(1, 3.0, true, 10, None)],
+        ];
+        let out = aggregate_bench_results(&qids, runs).expect("aggregate");
+        assert_eq!(out.len(), 1);
+        let r = &out[0];
+        assert!(!r.ok);
+        assert_eq!(r.error.as_deref(), Some("boom"));
+        assert!(r.runs.as_ref().is_some_and(|v| v.iter().any(|attempt| !attempt.ok)));
     }
 }
