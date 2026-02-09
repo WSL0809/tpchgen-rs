@@ -88,6 +88,7 @@ By default this:
 
 - drops existing tables before creating schema (`--drop-existing=true`)
 - truncates tables before loading (`--truncate`)
+- sleeps 30 minutes between load and run (`--sleep-seconds`, set to `0` to disable)
 - writes timings to `./tpch_timings.json`
 - runs all queries (Q1..Q22); pass `--query ...` to run a subset, or `--all` explicitly
 - runs a precheck step before benchmarking (see below)

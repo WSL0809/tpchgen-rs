@@ -172,6 +172,10 @@ struct BenchArgs {
     #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
     truncate: bool,
 
+    /// Sleep after load, before running queries (0 disables) (default: 1800 = 30 minutes)
+    #[arg(long, default_value_t = 1800)]
+    sleep_seconds: u64,
+
     /// Per-query server-side timeout via MAX_EXECUTION_TIME (0 disables)
     #[arg(long, default_value_t = 0)]
     timeout_seconds: u64,
@@ -1081,6 +1085,14 @@ async fn cmd_bench(args: BenchArgs) -> Result<()> {
         field_terminated_by: args.delimiter,
         line_terminated_by: "\\n".to_string(),
     })?;
+
+    if args.sleep_seconds > 0 {
+        eprintln!(
+            "bench: sleeping {}s between load and run (pass --sleep-seconds 0 to disable)",
+            args.sleep_seconds
+        );
+        std::thread::sleep(Duration::from_secs(args.sleep_seconds));
+    }
 
     // Keep existing behavior: if neither --all nor --query is provided, run all queries.
     let (all, query) = if !args.all && args.query.is_empty() {
